@@ -1,0 +1,18 @@
+# provider 바이너리. 수백 MB
+.terraform/
+
+# state 에 RDS 비밀번호와 IAM 액세스 키가 평문으로 들어간다
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+# 변수 실값
+*.tfvars
+*.tfvars.json
+
+# provider 버전 잠금은 커밋한다 — 같은 코드가 같은 결과를 내게 하는 파일이다
+!.terraform.lock.hcl
+
+# apply 결과를 파일로 저장했을 때
+*.tfplan
+crash.log

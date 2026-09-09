@@ -40,6 +40,15 @@ locals {
 
   # 집 MinIO 의 버킷 셋과 같은 이름. Mimir 는 한 버킷 안을 blocks/ ruler/ 로 나눠 쓴다.
   observability_buckets = ["mimir", "loki", "tempo"]
+
+  # GitLab 레지스트리와 같은 경로. 같은 이미지를 두 곳에 올릴 때 앞의 주소만 달라진다.
+  #   192.168.0.167:5050/cgv/cgv-onprem/queue-go:dev-106-3b6bd07c
+  #   <계정ID>.dkr.ecr.ap-northeast-2.amazonaws.com/cgv/cgv-onprem/queue-go:dev-106-3b6bd07c
+  ecr_repositories = [
+    "cgv/cgv-onprem/queue-go",
+    "cgv/cgv-onprem/booking",
+    "cgv/cgv-onprem/frontend",
+  ]
 }
 
 # ---------- Terraform state ----------
@@ -120,8 +129,127 @@ resource "aws_s3_bucket_public_access_block" "observability" {
   restrict_public_buckets = true
 }
 
+# ---------- 컨테이너 이미지 ----------
+# stg 를 지워도 여기 이미지는 남긴다. 켜는 날 apply 하자마자 배포하려면 이미지가 이미 있어야 한다.
+# ECR 을 stg state 에 두면 destroy 때 같이 지워져서, 켤 때마다 CI 부터 돌리고 기다리게 된다.
+# 저장 요금이 GB당 월 $0.10 이라 이미지 셋이면 사실상 0 이다.
+
+resource "aws_ecr_repository" "app" {
+  for_each = toset(local.ecr_repositories)
+
+  name = each.key
+
+  # 태그가 dev-<파이프라인번호>-<커밋해시> 라 매번 다르다. IMMUTABLE 로 잠가도 평소엔 안 걸리지만,
+  # 같은 파이프라인의 job 을 재시도하면 번호가 같아 push 가 거부된다.
+  # 켜 둔 시간이 그대로 비용이라 그 자리에서 막히지 않는 쪽으로 둔다. prd 면 IMMUTABLE 이다.
+  image_tag_mutability = "MUTABLE"
+
+  # 기본 스캔은 추가 요금이 없다. Inspector 를 쓰는 확장 스캔만 유료다.
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# 개수로만 지운다. 나이로 지우면 판과 판 사이가 벌어졌을 때 이미지가 사라지고,
+# 그러면 ECR 을 stg 밖에 둔 이유가 없어진다.
+resource "aws_ecr_lifecycle_policy" "app" {
+  for_each = aws_ecr_repository.app
+
+  repository = each.value.name
+
+  policy = jsonencode({
+    rules = [{
+      rulePriority = 1
+      description  = "최근 10개만 남긴다"
+      selection = {
+        tagStatus   = "any"
+        countType   = "imageCountMoreThan"
+        countNumber = 10
+      }
+      action = {
+        type = "expire"
+      }
+    }]
+  })
+}
+
+# ---------- AWS 밖에서 ECR 에 붙는 둘 ----------
+# 집 GitLab 러너와 argocd-image-updater 는 AWS 계정 밖에 있어 역할을 맡을 수 없다.
+# 그래서 사용자를 만들고 액세스 키로 붙는다. EKS 노드는 계정 안이라 노드 역할을 쓰고 여기 없다.
+#
+# ★ 액세스 키는 Terraform 이 만들지 않는다. 만들면 비밀값이 state 에 평문으로 남는다.
+#   콘솔에서 발급해 GitLab CI 변수와 클러스터 Secret 에 각각 넣는다.
+# ★ GetAuthorizationToken 만 Resource 를 못 좁힌다. 리포지토리가 아니라 레지스트리 단위 동작이다.
+
+# 켜는 날 이미지를 올린다
+resource "aws_iam_user" "ci_push" {
+  name = "${var.prefix}-ci-push"
+}
+
+resource "aws_iam_user_policy" "ci_push" {
+  name = "ecr-push"
+  user = aws_iam_user.ci_push.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability", # 이미 올라간 레이어는 다시 안 올린다
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+        ]
+        Resource = [for r in aws_ecr_repository.app : r.arn]
+      },
+    ]
+  })
+}
+
+# 2분마다 새 태그가 있는지 본다
+resource "aws_iam_user" "image_updater" {
+  name = "${var.prefix}-image-updater"
+}
+
+resource "aws_iam_user_policy" "image_updater" {
+  name = "ecr-read"
+  user = aws_iam_user.image_updater.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "ecr:GetAuthorizationToken"
+        Resource = "*"
+      },
+      {
+        # update-strategy 가 newest-build 라 태그 목록만으로는 안 된다.
+        # 태그 이름이 아니라 빌드 시각으로 고르는데 그 값이 이미지 설정 블록 안에 있어서,
+        # 매니페스트와 그 블록을 받아 와야 읽힌다. 뒤의 둘이 그 몫이다.
+        Effect = "Allow"
+        Action = [
+          "ecr:DescribeRepositories",
+          "ecr:ListImages",
+          "ecr:DescribeImages",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+        ]
+        Resource = [for r in aws_ecr_repository.app : r.arn]
+      },
+    ]
+  })
+}
+
 # ---------- 출력 ----------
-# stg/main.tf 의 backend 와 관측 차트 values 에 이 값을 적는다.
+# stg/main.tf 의 backend, 관측 차트 values, GitLab CI 의 push 대상에 이 값을 적는다.
 
 output "tfstate_bucket" {
   value = aws_s3_bucket.tfstate.id
@@ -129,4 +257,16 @@ output "tfstate_bucket" {
 
 output "observability_buckets" {
   value = { for name, b in aws_s3_bucket.observability : name => b.id }
+}
+
+output "ecr_repositories" {
+  value = { for name, r in aws_ecr_repository.app : name => r.repository_url }
+}
+
+# 이 둘의 액세스 키를 콘솔에서 발급한다. Terraform 이 안 만든다.
+output "ecr_users" {
+  value = {
+    push   = aws_iam_user.ci_push.name
+    poll   = aws_iam_user.image_updater.name
+  }
 }

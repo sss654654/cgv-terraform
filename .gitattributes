@@ -1,0 +1,4 @@
+# 저장소 안에서는 항상 LF 로 둔다.
+# Windows 에서 체크아웃해도 변환하지 않는다 — user_data 셸 스크립트가 CRLF 면
+# EC2 안에서 \r 때문에 실행되지 않는다.
+* text=auto eol=lf

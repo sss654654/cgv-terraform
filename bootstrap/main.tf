@@ -184,6 +184,13 @@ resource "aws_ecr_lifecycle_policy" "app" {
 # 켜는 날 이미지를 올린다
 resource "aws_iam_user" "ci_push" {
   name = "${var.prefix}-ci-push"
+
+  # 콘솔에서 액세스 키를 발급할 때 적은 설명이 사용자 태그로 저장된다(키는 태그 이름, 설명은 값).
+  # 코드에 없으니 Terraform 이 지우려 하는데, 키를 재발급할 때마다 같은 차이가 다시 생긴다.
+  # 무시하지 않으면 그 차이가 plan 에 계속 떠서 실제 변경과 섞인다.
+  lifecycle {
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 resource "aws_iam_user_policy" "ci_push" {
@@ -206,6 +213,10 @@ resource "aws_iam_user_policy" "ci_push" {
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload",
           "ecr:PutImage",
+          # ★ push 인데 읽기가 하나 필요하다. docker 는 레이어를 다 올린 뒤
+          #   매니페스트가 이미 있는지 HEAD 로 확인하고, ECR 은 그 동작을 이 권한으로 판정한다.
+          #   없으면 레이어는 전부 올라가고 마지막에만 403 이 난다 — 2026-09-10 에 실제로 그랬다.
+          "ecr:BatchGetImage",
         ]
         Resource = [for r in aws_ecr_repository.app : r.arn]
       },
@@ -216,6 +227,11 @@ resource "aws_iam_user_policy" "ci_push" {
 # 2분마다 새 태그가 있는지 본다
 resource "aws_iam_user" "image_updater" {
   name = "${var.prefix}-image-updater"
+
+  # ci_push 와 같은 이유. 콘솔에서 발급한 액세스 키의 설명이 태그로 남는다.
+  lifecycle {
+    ignore_changes = [tags, tags_all]
+  }
 }
 
 resource "aws_iam_user_policy" "image_updater" {
@@ -266,7 +282,7 @@ output "ecr_repositories" {
 # 이 둘의 액세스 키를 콘솔에서 발급한다. Terraform 이 안 만든다.
 output "ecr_users" {
   value = {
-    push   = aws_iam_user.ci_push.name
-    poll   = aws_iam_user.image_updater.name
+    push = aws_iam_user.ci_push.name
+    poll = aws_iam_user.image_updater.name
   }
 }

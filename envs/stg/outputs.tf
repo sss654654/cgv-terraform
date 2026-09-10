@@ -1,0 +1,42 @@
+# 출력 이름을 영문으로 둔다. terraform output <이름> 으로 꺼낼 때 한글이면 셸에서 깨진다.
+
+# ★ 켜는 날 cgv-infra 에 손으로 옮기는 값. 이름에 AWS 가 붙이는 무작위 조각이 있어 미리 알 수 없다.
+output "handoff" {
+  value = {
+    kubeconfig = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
+    eks_api    = module.eks.cluster_endpoint
+    mysql_host = module.data.mysql_host
+    redis_host = module.data.redis_host
+  }
+}
+
+# 이 값들은 이름·대역만 정하면 결정되므로 cgv-infra 에 이미 적혀 있어야 한다.
+# 여기서는 대조용으로만 찍는다. 다르면 cgv-infra 쪽을 고친다.
+output "expected" {
+  value = {
+    irsa_role_arns = module.eks.irsa_role_arns
+    dns_resolver   = module.eks.coredns_cluster_ip
+    obs_buckets    = local.observability_buckets
+    alb_sg         = module.network.alb_security_group_id
+  }
+}
+
+output "loadgen" {
+  value = var.loadgen_enabled ? {
+    instance_id = aws_instance.loadgen[0].id
+    connect     = "aws ssm start-session --target ${aws_instance.loadgen[0].id} --region ${var.region}"
+    note        = "VPC 안이지만 ALB 를 공인 주소로 부른다. 그래서 이 인스턴스의 공인 IP 를 ALB 보안 그룹에 열어 뒀다"
+    } : {
+    instance_id = "(꺼져 있음)"
+    connect     = "loadgen_enabled = true 로 apply 하면 뜬다"
+    note        = "시간당 $0.768 이라 판 돌릴 때만 켠다"
+  }
+}
+
+output "checks" {
+  value = {
+    home_cidr_at_apply = local.home_cidr
+    oidc_issuer        = module.eks.oidc_issuer
+    azs                = var.azs
+  }
+}

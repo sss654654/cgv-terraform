@@ -37,16 +37,6 @@ variable "db_username" {
   type = string
 }
 
-variable "db_password" {
-  description = <<-EOT
-    ★ 이 값은 state 에 평문으로 들어간다. Terraform 이 만든 자원의 속성을 그대로 기록하기 때문이다.
-      그래서 state 버킷에 암호화를 걸어 뒀다(bootstrap 의 aws_s3_bucket_server_side_encryption_configuration).
-      코드나 tfvars 파일에 적지 않는다 — apply 할 때 TF_VAR_db_password 로 넣는다.
-  EOT
-  type        = string
-  sensitive   = true
-}
-
 variable "redis_version" {
   type = string
 }

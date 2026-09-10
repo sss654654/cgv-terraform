@@ -7,6 +7,9 @@ output "handoff" {
     eks_api    = module.eks.cluster_endpoint
     mysql_host = module.data.mysql_host
     redis_host = module.data.redis_host
+
+    # AWS 가 만든 마스터 비밀번호가 든 시크릿. 이 ARN 으로 값을 읽어 booking-secrets 를 만든다.
+    mysql_secret_arn = module.data.mysql_secret_arn
   }
 }
 

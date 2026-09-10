@@ -77,7 +77,12 @@ resource "aws_db_instance" "this" {
 
   db_name  = var.db_name
   username = var.db_username
-  password = var.db_password
+
+  # 비밀번호를 사람이 정하지 않는다. AWS 가 만들어 Secrets Manager 에 넣고,
+  # Terraform 은 그 값을 받지 않는다 — 그래서 state 에 평문이 남지 않는다.
+  # 만들어진 시크릿의 ARN 은 master_user_secret 속성으로 나온다(outputs.tf).
+  # booking 은 이 마스터 계정(db_username)으로 붙으므로 이 값 하나가 곧 MYSQL_PASSWORD 다.
+  manage_master_user_password = true
 
   db_subnet_group_name   = aws_db_subnet_group.this.name
   parameter_group_name   = aws_db_parameter_group.this.name

@@ -41,9 +41,11 @@ locals {
   # 집 MinIO 의 버킷 셋과 같은 이름. Mimir 는 한 버킷 안을 blocks/ ruler/ 로 나눠 쓴다.
   observability_buckets = ["mimir", "loki", "tempo"]
 
-  # GitLab 레지스트리와 같은 경로. 같은 이미지를 두 곳에 올릴 때 앞의 주소만 달라진다.
-  #   192.168.0.167:5050/cgv/cgv-onprem/queue-go:dev-106-3b6bd07c
-  #   <계정ID>.dkr.ecr.ap-northeast-2.amazonaws.com/cgv/cgv-onprem/queue-go:dev-106-3b6bd07c
+  # GitLab 레지스트리와 같은 경로. 앞의 주소와 태그가 달라진다.
+  #   192.168.0.167:5050/cgv/cgv-onprem/queue-go:main-106-3b6bd07c
+  #   <계정ID>.dkr.ecr.ap-northeast-2.amazonaws.com/cgv/cgv-onprem/queue-go:3b6bd07c
+  # ECR 쪽 태그에는 브랜치·환경이 들어가지 않는다 — 같은 이미지를 여러 환경이 같은 이름으로
+  # 부르려면 이름이 환경과 무관해야 한다.
   ecr_repositories = [
     "cgv/cgv-onprem/queue-go",
     "cgv/cgv-onprem/booking",
@@ -139,8 +141,8 @@ resource "aws_ecr_repository" "app" {
 
   name = each.key
 
-  # 태그가 dev-<파이프라인번호>-<커밋해시> 라 매번 다르다. IMMUTABLE 로 잠가도 평소엔 안 걸리지만,
-  # 같은 파이프라인의 job 을 재시도하면 번호가 같아 push 가 거부된다.
+  # 태그가 커밋 해시라 커밋마다 다르다. IMMUTABLE 로 잠가도 평소엔 안 걸리지만,
+  # 같은 커밋에서 job 을 재시도하면 태그가 같아 push 가 거부된다.
   # 켜 둔 시간이 그대로 비용이라 그 자리에서 막히지 않는 쪽으로 둔다. prd 면 IMMUTABLE 이다.
   image_tag_mutability = "MUTABLE"
 

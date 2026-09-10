@@ -112,7 +112,6 @@ module "data" {
   rds_parameter_family = var.rds_parameter_family
   db_name              = var.db_name
   db_username          = var.db_username
-  db_password          = var.db_password
 
   redis_version          = var.redis_version
   redis_node_type        = var.redis_node_type

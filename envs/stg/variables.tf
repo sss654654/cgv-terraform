@@ -102,17 +102,10 @@ variable "db_username" {
   default = "cgv"
 }
 
-variable "db_password" {
-  description = <<-EOT
-    ★ 코드에도 tfvars 에도 적지 않는다. apply 할 때 환경변수로 넣는다.
-      PowerShell   $env:TF_VAR_db_password = "..."
-      bash         export TF_VAR_db_password='...'
-    이 값은 state 에 평문으로 남는다 — 그래서 state 버킷에 암호화를 걸어 뒀다.
-    booking 파드가 받는 MYSQL_PASSWORD 와 같은 값이어야 붙는다.
-  EOT
-  type        = string
-  sensitive   = true
-}
+# ★ db_password 변수는 없앴다 (2026-09-11).
+#   RDS 의 manage_master_user_password 로 AWS 가 값을 만들어 Secrets Manager 에 넣는다.
+#   Terraform 이 그 값을 안 받으므로 state 에 평문이 남지 않고, apply 에 환경변수도 필요 없다.
+#   파드가 받는 MYSQL_PASSWORD 는 그 시크릿에서 읽어 kubectl 로 만든다(handoff 의 mysql_secret_arn).
 
 variable "redis_version" {
   type    = string

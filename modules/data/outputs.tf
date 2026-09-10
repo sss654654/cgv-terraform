@@ -18,3 +18,13 @@ output "redis_host" {
 output "data_security_group_id" {
   value = aws_security_group.data.id
 }
+
+output "mysql_secret_arn" {
+  description = <<-EOT
+    AWS 가 만든 마스터 비밀번호가 담긴 Secrets Manager 시크릿.
+    켜는 날 이 ARN 으로 값을 읽어 app 네임스페이스의 booking-secrets 를 만든다.
+      aws secretsmanager get-secret-value --secret-id <이 값> --query SecretString --output text
+    돌아오는 것은 {"username":...,"password":...} 형태의 JSON 이라 password 만 꺼내 쓴다.
+  EOT
+  value       = aws_db_instance.this.master_user_secret[0].secret_arn
+}

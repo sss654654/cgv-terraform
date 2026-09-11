@@ -197,3 +197,4 @@ Application 을 지우는 것으로는 정리되지 않는다. cgv-infra 의 App
 - CI 가 ECR 에 올리는 자격은 IAM 사용자의 장기 액세스 키다. GitLab 이 사설 IP 라 AWS 가 GitLab 을 OIDC 발급자로 검증할 수 없다.
 - 노드 수가 고정이다(오토스케일링 없음).
 - `bootstrap` state 는 로컬 파일 하나다. 잃으면 이름이 결정적이라 `terraform import` 로 되살린다(시도해 본 적은 없다).
+- RDS · ElastiCache 보안 그룹은 **노드** 보안 그룹에서 오는 것을 받는다. 보안 그룹은 노드의 네트워크 인터페이스에 붙어 노드 위 어느 파드든 통과한다 — 온프레미스에서 DB 파드에 걸었던 "booking · queue 파드만 받는다" 는 입구 규칙이 여기서는 노드 단위로 느슨해진다. 파드 단위 구분은 cgv-infra 의 앱 쪽 출구 NetworkPolicy 하나가 맡는다(VPC CNI 에이전트가 실제로 막는지는 켜는 날 음성 시험으로 확인한다). prd 는 Security Groups for Pods 로 파드에 보안 그룹을 붙이고 DB 보안 그룹의 출처를 그 보안 그룹으로 좁힌다.

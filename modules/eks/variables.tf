@@ -50,3 +50,11 @@ variable "observability_buckets" {
   description = "관측 셋이 쓰는 S3 버킷 이름. bootstrap 이 만든 것을 받는다."
   type        = list(string)
 }
+
+variable "tags" {
+  description = <<-EOT
+    provider 의 default_tags 가 닿지 않는 자원에 붙일 태그.
+    노드 EC2 · 루트 볼륨(launch template)과 EBS CSI 가 PVC 로 만드는 볼륨이다.
+  EOT
+  type        = map(string)
+}

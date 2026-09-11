@@ -39,6 +39,15 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  # 이 state 가 만드는 모든 AWS 자원에 붙는다. 비용 보고서(Cost Explorer)에서 Environment=stg 로
+  #   하루 환경의 비용만 거른다. 태그로 비용을 가르려면 결제 콘솔에서 이 키들을 비용 할당 태그로
+  #   한 번 활성화해야 한다(Billing → Cost allocation tags).
+  # provider 밖에서 생기는 자원(노드 EC2 · EBS CSI 볼륨 · ALB Controller 의 ALB)에는 안 붙는다.
+  #   그쪽은 modules/eks 의 tags 와 cgv-infra 의 ALB Controller 값이 따로 붙인다.
+  default_tags {
+    tags = local.tags
+  }
 }
 
 # 집 공인 IP. DDNS 라 날마다 바뀌어서 apply 시점에 조회한다.
@@ -49,6 +58,13 @@ data "http" "myip" {
 
 locals {
   home_cidr = "${chomp(data.http.myip.response_body)}/32"
+
+  # 공통 태그. bootstrap 은 Environment=shared 다 — 여러 환경이 같이 쓰고 클러스터보다 오래 산다.
+  tags = {
+    Project     = "cgv"
+    Environment = "stg"
+    ManagedBy   = "terraform"
+  }
 
   # bootstrap 이 만든 버킷들. 이름이 결정적이라(<prefix>-<이름>-<계정ID>) 여기 적을 수 있다.
   # 다른 state 의 출력을 참조하지 않는 이유 — 그러면 stg 가 bootstrap state 를 읽어야 해서
@@ -96,6 +112,8 @@ module "eks" {
 
   irsa_service_accounts = local.irsa_service_accounts
   observability_buckets = local.observability_buckets
+
+  tags = local.tags
 }
 
 module "data" {

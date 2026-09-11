@@ -20,6 +20,16 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  # 이 state 가 만드는 모든 AWS 자원에 붙는다. Environment=shared 는 여러 환경이 같이 쓰고
+  #   클러스터보다 오래 사는 것이라는 뜻이다(envs/stg 는 Environment=stg).
+  default_tags {
+    tags = {
+      Project     = "cgv"
+      Environment = "shared"
+      ManagedBy   = "terraform"
+    }
+  }
 }
 
 variable "region" {

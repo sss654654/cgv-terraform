@@ -47,6 +47,18 @@ resource "aws_eks_cluster" "this" {
     service_ipv4_cidr = var.service_cidr
   }
 
+  # 누가 이 클러스터의 쿠버네티스 관리자인가.
+  #   API  권한을 EKS access entry(AWS API 오브젝트)로만 준다. aws-auth ConfigMap 을 안 쓴다.
+  #   bootstrap_cluster_creator_admin_permissions
+  #        terraform apply 를 실행한 IAM 주체에게 클러스터 관리자 access entry 를 만든다.
+  #        bootstrap/eks/register.sh(cgv-infra)가 argocd-manager 를 만들 수 있는 것이 이 권한이다.
+  #   노드 역할의 access entry 는 관리형 노드그룹이 만들 때 EKS 가 자동으로 넣는다.
+  # 블록을 생략하면 같은 결과가 AWS 기본값으로 정해지는데, 무엇으로 정해졌는지 코드에 안 보인다.
+  access_config {
+    authentication_mode                         = "API"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   depends_on = [aws_iam_role_policy_attachment.cluster]
 }
 
@@ -95,12 +107,61 @@ resource "aws_iam_role_policy_attachment" "node" {
   policy_arn = each.key
 }
 
+# 노드 두 그룹이 같이 쓰는 인스턴스 설정. 노드그룹 인자로는 못 정하는 것만 둔다.
+resource "aws_launch_template" "node" {
+  name_prefix = "${var.prefix}-node-"
+
+  # IMDSv2 만 받는다(토큰 없는 요청 거부). hop limit 1 이면 파드 네트워크에서는 IMDS 에 닿지 않아
+  #   파드가 노드 역할의 자격을 꺼내 쓰는 경로가 막힌다. AWS 자격이 필요한 파드는 IRSA 로 받는다.
+  #   hostNetwork 로 도는 vpc-cni · kube-proxy 는 노드와 같은 네트워크라 영향이 없다.
+  #   EBS CSI 노드 플러그인은 IMDS 에 못 닿으면 쿠버네티스 노드 정보(라벨 · providerID)로 넘어간다.
+  #   리전이 필요한 파드(Mimir · Loki · Tempo · ALB Controller · YACE)는 값 파일에 리전을 적어 두었다.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  # 루트 볼륨. 관리형 노드그룹 기본(20 GiB)과 같은 크기에 암호화를 더한다.
+  #   launch template 을 쓰면 노드그룹의 disk_size 를 못 쓰고 여기서 정한다.
+  block_device_mappings {
+    device_name = "/dev/xvda"
+
+    ebs {
+      volume_size           = 20
+      volume_type           = "gp3"
+      encrypted             = true
+      delete_on_termination = true
+    }
+  }
+
+  # provider 의 default_tags 는 이 launch template 자원에만 붙고, 이것으로 뜨는 EC2 · 루트 볼륨에는
+  #   안 붙는다. 하루 비용의 대부분이 노드라 여기서 따로 붙인다.
+  tag_specifications {
+    resource_type = "instance"
+    tags          = var.tags
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags          = var.tags
+  }
+}
+
 resource "aws_eks_node_group" "app" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "app"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.subnet_ids
   instance_types  = [var.app_instance_type]
+
+  # 쿠버네티스 1.30 부터 관리형 노드그룹의 기본 AMI 가 AL2023 이다. 기본값에 기대지 않고 적는다.
+  ami_type = "AL2023_x86_64_STANDARD"
+
+  launch_template {
+    id      = aws_launch_template.node.id
+    version = aws_launch_template.node.latest_version
+  }
 
   # t 계열을 안 쓴다. 버스터블이라 크레딧이 바닥나면 baseline 으로 떨어지는데,
   # 그 순간 느려진 것이 서비스 한계인지 크레딧 고갈인지 가릴 수 없다.
@@ -127,6 +188,12 @@ resource "aws_eks_node_group" "observability" {
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.subnet_ids
   instance_types  = [var.obs_instance_type]
+  ami_type        = "AL2023_x86_64_STANDARD"
+
+  launch_template {
+    id      = aws_launch_template.node.id
+    version = aws_launch_template.node.latest_version
+  }
 
   scaling_config {
     desired_size = 1
@@ -158,9 +225,23 @@ resource "aws_eks_node_group" "observability" {
 #   애드온으로 다시 만들면 "이미 있다" 로 실패한다. OVERWRITE 는 그때 우리 것으로 덮으라는 뜻이다.
 #   EBS CSI 는 기본 설치가 없어서 이 값이 필요 없다.
 
+locals {
+  # 애드온 버전. 적지 않으면 apply 할 때 AWS 가 고른 버전이 들어가 켤 때마다 달라질 수 있다.
+  #   값은 aws eks describe-addon-versions --kubernetes-version 1.33 의 기본 버전(defaultVersion)이다
+  #   (2026-09-11 조회). 클러스터 버전을 올리면 같은 명령으로 다시 고른다.
+  addon_versions = {
+    "vpc-cni"            = "v1.22.4-eksbuild.3"
+    "kube-proxy"         = "v1.33.10-eksbuild.21"
+    "coredns"            = "v1.12.4-eksbuild.29"
+    "aws-ebs-csi-driver" = "v1.65.0-eksbuild.2"
+    "metrics-server"     = "v0.8.1-eksbuild.19"
+  }
+}
+
 resource "aws_eks_addon" "vpc_cni" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "vpc-cni"
+  addon_version               = local.addon_versions["vpc-cni"]
   resolve_conflicts_on_create = "OVERWRITE"
 
   # ★ NetworkPolicy 집행을 켠다.
@@ -175,6 +256,7 @@ resource "aws_eks_addon" "vpc_cni" {
 resource "aws_eks_addon" "kube_proxy" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "kube-proxy"
+  addon_version               = local.addon_versions["kube-proxy"]
   resolve_conflicts_on_create = "OVERWRITE"
 }
 
@@ -182,6 +264,7 @@ resource "aws_eks_addon" "kube_proxy" {
 resource "aws_eks_addon" "coredns" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "coredns"
+  addon_version               = local.addon_versions["coredns"]
   resolve_conflicts_on_create = "OVERWRITE"
 
   depends_on = [aws_eks_node_group.app]
@@ -190,7 +273,17 @@ resource "aws_eks_addon" "coredns" {
 resource "aws_eks_addon" "ebs_csi" {
   cluster_name             = aws_eks_cluster.this.name
   addon_name               = "aws-ebs-csi-driver"
+  addon_version            = local.addon_versions["aws-ebs-csi-driver"]
   service_account_role_arn = aws_iam_role.irsa["ebs-csi"].arn
+
+  # PVC 로 만드는 볼륨(Kafka 60Gi × 3 · 관측 WAL)에 붙일 태그. Terraform 밖에서 생겨
+  #   default_tags 가 안 닿는다. 키 이름은 애드온 설정 스키마의 controller.extraVolumeTags 다
+  #   (aws eks describe-addon-configuration --addon-name aws-ebs-csi-driver).
+  configuration_values = jsonencode({
+    controller = {
+      extraVolumeTags = var.tags
+    }
+  })
 
   depends_on = [aws_eks_node_group.app]
 }
@@ -201,8 +294,9 @@ resource "aws_eks_addon" "ebs_csi" {
 #   EKS 가 관리형 애드온으로 준다 — aws eks describe-addon-versions --addon-name metrics-server
 #   (kubernetes 1.33 · publisher eks 확인). 뜰 노드가 있어야 해서 노드그룹 뒤다.
 resource "aws_eks_addon" "metrics_server" {
-  cluster_name = aws_eks_cluster.this.name
-  addon_name   = "metrics-server"
+  cluster_name  = aws_eks_cluster.this.name
+  addon_name    = "metrics-server"
+  addon_version = local.addon_versions["metrics-server"]
 
   depends_on = [aws_eks_node_group.app]
 }

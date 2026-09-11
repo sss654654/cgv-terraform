@@ -11,7 +11,14 @@ output "subnet_ids" {
   value       = [for s in aws_subnet.public : s.id]
 }
 
-output "alb_security_group_id" {
-  description = "cgv-infra 의 Ingress 애노테이션에 적는다. 안 적으면 컨트롤러가 SG 를 새로 만들어 이 규칙이 안 걸린다."
-  value       = aws_security_group.alb.id
+# cgv-infra 의 Ingress 는 이름(Name 태그)으로 가리킨다. ID 는 이름이 안 먹을 때 대신 적는 값이다.
+#   애노테이션이 없으면 컨트롤러가 보안 그룹을 새로 만들어 0.0.0.0/0 으로 열어, 이 규칙이 안 걸린다.
+output "alb_public_security_group_id" {
+  description = "서비스(frontend) ALB. 인터넷 전체에 80."
+  value       = aws_security_group.alb_public.id
+}
+
+output "alb_admin_security_group_id" {
+  description = "Grafana ALB. 집 공인 IP 에만 80."
+  value       = aws_security_group.alb_admin.id
 }

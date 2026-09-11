@@ -20,7 +20,9 @@ output "expected" {
     irsa_role_arns = module.eks.irsa_role_arns
     dns_resolver   = module.eks.coredns_cluster_ip
     obs_buckets    = local.observability_buckets
-    alb_sg         = module.network.alb_security_group_id
+    # cgv-infra 는 이름(cgv-stg-alb-public · cgv-stg-alb-admin)으로 가리킨다. 이름이 안 먹으면 이 ID 로 바꾼다.
+    alb_public_sg = module.network.alb_public_security_group_id
+    alb_admin_sg  = module.network.alb_admin_security_group_id
   }
 }
 
@@ -28,7 +30,7 @@ output "loadgen" {
   value = var.loadgen_enabled ? {
     instance_id = aws_instance.loadgen[0].id
     connect     = "aws ssm start-session --target ${aws_instance.loadgen[0].id} --region ${var.region}"
-    note        = "VPC 안이지만 ALB 를 공인 주소로 부른다. 그래서 이 인스턴스의 공인 IP 를 ALB 보안 그룹에 열어 뒀다"
+    note        = "VPC 안이지만 ALB 를 공인 주소로 부른다. 서비스 ALB 가 인터넷 전체에 열려 있어 따로 열 것이 없다"
     } : {
     instance_id = "(꺼져 있음)"
     connect     = "loadgen_enabled = true 로 apply 하면 뜬다"

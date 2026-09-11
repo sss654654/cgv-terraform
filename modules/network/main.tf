@@ -91,18 +91,44 @@ resource "aws_route_table_association" "public" {
 # 온프레미스는 가만히 두면 닫혀 있다. 포트포워딩을 안 하면 아무도 못 들어온다.
 # 클라우드는 반대라 가만히 두면 열 수 있다. 여기서 적극적으로 좁힌다.
 
-resource "aws_security_group" "alb" {
-  name        = "${var.prefix}-alb"
-  description = "ALB inbound"
+# ALB 가 둘이다 — 서비스(frontend)와 Grafana. 여는 범위가 달라 보안 그룹을 가른다.
+#   서비스   인터넷 전체에 80. 누구나 대기열 · 예매를 쓴다
+#   Grafana  집 공인 IP 에만 80. 관측 화면은 운영자만 본다
+# 한 보안 그룹을 같이 쓰면 서비스를 여는 순간 Grafana 도 같이 열린다.
+# cgv-infra 의 두 Ingress 가 이 이름(Name 태그)으로 가리킨다 — ALB Controller 의 security-groups
+#   애노테이션은 ID 와 Name 태그를 둘 다 받는다. 이름이 정해져 있어 켜는 날 옮길 값이 없다.
+# 도메인도 인증서도 안 쓰기로 해서 둘 다 80 뿐이다.
+
+resource "aws_security_group" "alb_public" {
+  name        = "${var.prefix}-alb-public"
+  description = "service ALB inbound from the internet"
   vpc_id      = aws_vpc.this.id
 
-  tags = { Name = "${var.prefix}-alb" }
+  tags = { Name = "${var.prefix}-alb-public" }
 }
 
-# 브라우저로 확인할 때 — 집 공인 IP 하나만.
-# 도메인도 인증서도 안 쓰기로 해서 80 뿐이다.
-resource "aws_vpc_security_group_ingress_rule" "alb_from_home" {
-  security_group_id = aws_security_group.alb.id
+# 부하 발생기도 이 규칙으로 들어온다. VPC 안에서 인터넷용 ALB 를 부르면 주소가 공인 IP 로 풀려
+#   트래픽이 IGW 로 나갔다 들어오고, ALB 가 보는 출발지가 부하 발생기의 공인 IP 가 된다.
+resource "aws_vpc_security_group_ingress_rule" "alb_public_http" {
+  security_group_id = aws_security_group.alb_public.id
+  description       = "internet"
+
+  cidr_ipv4   = "0.0.0.0/0"
+  ip_protocol = "tcp"
+  from_port   = 80
+  to_port     = 80
+}
+
+resource "aws_security_group" "alb_admin" {
+  name        = "${var.prefix}-alb-admin"
+  description = "Grafana ALB inbound from home only"
+  vpc_id      = aws_vpc.this.id
+
+  tags = { Name = "${var.prefix}-alb-admin" }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_admin_from_home" {
+  security_group_id = aws_security_group.alb_admin.id
   description       = "home public IP"
 
   cidr_ipv4   = var.home_cidr
@@ -111,21 +137,15 @@ resource "aws_vpc_security_group_ingress_rule" "alb_from_home" {
   to_port     = 80
 }
 
-# 부하 발생기가 VPC 안에서 때릴 때.
-resource "aws_vpc_security_group_ingress_rule" "alb_from_vpc" {
-  security_group_id = aws_security_group.alb.id
-  description       = "load generator inside VPC"
-
-  cidr_ipv4   = var.vpc_cidr
-  ip_protocol = "tcp"
-  from_port   = 80
-  to_port     = 80
-}
-
 # ALB 가 노드로 보내는 길. 대상 포트가 무엇이 될지는 서비스마다 달라 전부 연다 —
 # 나가는 쪽이라 이 규칙이 여는 것은 ALB 가 보낼 수 있는 범위이지 밖에서 들어오는 문이 아니다.
 resource "aws_vpc_security_group_egress_rule" "alb_all" {
-  security_group_id = aws_security_group.alb.id
+  for_each = {
+    public = aws_security_group.alb_public.id
+    admin  = aws_security_group.alb_admin.id
+  }
+
+  security_group_id = each.value
   description       = "to nodes"
 
   cidr_ipv4   = "0.0.0.0/0"

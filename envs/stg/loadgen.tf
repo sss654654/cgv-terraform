@@ -81,22 +81,8 @@ resource "aws_instance" "loadgen" {
   tags = { Name = "${var.prefix}-loadgen" }
 }
 
-# ★ 이 규칙이 없으면 부하가 ALB 에 닿지 않는다.
-#
-# ALB 는 인터넷용(internet-facing)이라 VPC 안에서 그 DNS 이름을 불러도 주소가 공인 IP 로 풀린다.
-# 그러면 트래픽이 IGW 로 나갔다 다시 들어오고, ALB 가 보는 출발지는 VPC 사설 주소가 아니라
-# 이 인스턴스의 공인 IP 다. 같은 이유로 보안 그룹끼리 참조하는 방식도 안 통한다.
-#
-# network 모듈의 ALB 보안 그룹에 VPC 대역을 열어 뒀지만 그것으로는 안 맞는다.
-# 인스턴스가 받은 공인 IP 를 그때그때 규칙으로 더한다.
-resource "aws_vpc_security_group_ingress_rule" "alb_from_loadgen" {
-  count = local.loadgen_count
-
-  security_group_id = module.network.alb_security_group_id
-  description       = "load generator public IP"
-
-  cidr_ipv4   = "${aws_instance.loadgen[0].public_ip}/32"
-  ip_protocol = "tcp"
-  from_port   = 80
-  to_port     = 80
-}
+# ALB 로 들어가는 규칙은 따로 두지 않는다.
+#   ALB 는 인터넷용(internet-facing)이라 VPC 안에서 그 DNS 이름을 불러도 주소가 공인 IP 로 풀린다.
+#   트래픽이 IGW 로 나갔다 다시 들어오고, ALB 가 보는 출발지는 이 인스턴스의 공인 IP 다
+#   (그래서 VPC 대역이나 보안 그룹 참조로 여는 방식은 안 맞는다).
+#   서비스 ALB 가 인터넷 전체에 80 을 열어 두어(modules/network) 이 인스턴스도 그 규칙으로 들어간다.

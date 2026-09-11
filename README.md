@@ -12,7 +12,9 @@ CGV 예매 대기열 서비스의 **stg 환경을 AWS 에 만드는 Terraform** 
   k3s dev
     └ ArgoCD (허브, dev 와 stg 를 함께 배달) ── EKS API ──────▶ EKS 컨트롤 플레인
                                              (public, 집 공인 IP 만)
-  브라우저 ── HTTP 80 (집 공인 IP 만) ─────────────────────────▶ ALB
+  브라우저 ── HTTP 80 (집 공인 IP 만) ─────────────────────────▶ Grafana ALB
+
+인터넷 (누구나) ── HTTP 80 ───────────────────────────────────▶ 서비스 ALB
 
 AWS ap-northeast-2 · VPC 10.20.0.0/16 · 퍼블릭 서브넷 2a · 2c · 2b · NAT 없음
   ALB  (cgv-infra 의 Ingress 를 보고 ALB Controller 가 만든다)
@@ -61,7 +63,8 @@ modules/data/      RDS · ElastiCache · 보안 그룹
 - AZ 가 셋인 이유는 Kafka 다. 브로커 셋이 컨트롤러 과반 투표와 `min.insync.replicas` 2 를 겸해서, AZ 둘에 나누면 한쪽에 둘이 가고 그 AZ 가 죽으면 리더를 못 뽑아 쓰기가 멈춘다. AZ 마다 하나씩 두면(cgv-infra 의 zone 분산 규칙) 어느 AZ 가 죽어도 둘이 남는다.
   앱 파드 · RDS · ElastiCache 는 AZ 둘이면 된다. 앱 파드는 서로 대체되고, RDS · ElastiCache 는 AWS 가 밖에서 전환을 정한다.
 - 서브넷 CIDR 은 `azs` 목록 순번으로 자른다. 새 AZ 는 목록 끝에 더해야 기존 서브넷이 바뀌지 않는다.
-- ALB 보안 그룹은 80 을 두 곳에만 연다. 집 공인 IP(/32)와 VPC 안(부하 발생기).
+- ALB 가 둘이고 보안 그룹도 둘이다. 서비스 ALB(`cgv-stg-alb-public`)는 80 을 인터넷 전체에 열고, Grafana ALB(`cgv-stg-alb-admin`)는 집 공인 IP(/32)에만 연다. 한 그룹을 같이 쓰면 서비스를 여는 순간 Grafana 도 열린다. cgv-infra 의 두 Ingress 가 이 이름(Name 태그)으로 가리킨다.
+- 부하 발생기는 VPC 안에 있지만 인터넷용 ALB 를 공인 주소로 부른다(트래픽이 IGW 로 나갔다 들어온다). 서비스 ALB 가 인터넷 전체에 열려 있어 따로 여는 규칙이 없다.
 - 서브넷의 `kubernetes.io/role/elb` · `kubernetes.io/cluster/cgv-stg` 태그를 보고 ALB Controller 가 ALB 를 놓을 자리를 찾는다.
 
 ### EKS 클러스터
@@ -165,7 +168,7 @@ provider 의 `default_tags` 가 안 닿는 곳 — 노드 EC2 · 루트 볼륨, 
 | 1. Terraform | 이 저장소의 `envs/stg` 전부 | `terraform apply` | 없음 |
 | 2. 사람 명령 한 번 | 내 kubectl 이 EKS 를 가리키게 한다 | `aws eks update-kubeconfig --region ap-northeast-2 --name cgv-stg --alias cgv-stg` (`terraform output handoff` 에 찍힌다) | 설정만 |
 | 3. 스크립트 | `register.sh` — EKS 에 허브용 계정을 만들고 허브 ArgoCD 에 클러스터로 등록한다<br>`secrets.sh` — RDS 비밀번호 등 Secret 넷을 넣는다 | cgv-infra `bootstrap/eks/` | 스크립트 안에서 쓴다 |
-| 4. git 커밋 한 번 | `STG_EKS_ENDPOINT` 를 EKS 주소로, `PLACEHOLDER`(RDS · Redis 주소, ALB 보안 그룹, 이미지 태그)를 `terraform output` 값으로 채워 main 에 머지한다 | cgv-infra | 없음 |
+| 4. git 커밋 한 번 | `STG_EKS_ENDPOINT` 를 EKS 주소로, `PLACEHOLDER`(RDS · Redis 주소, Grafana 주소, 이미지 태그)를 `terraform output` 값으로 채워 main 에 머지한다(ALB 보안 그룹은 이름으로 가리켜 옮길 값이 없다) | cgv-infra | 없음 |
 | 5. GitOps | 허브 ArgoCD 가 wave 순서로 배달한다 — 네임스페이스 · StorageClass · CRD → Strimzi · ALB Controller → Kafka → 관측 → 앱 | 허브 ArgoCD | 없음 |
 
 순서: 1 → 2 → `register.sh` → 4 → (5 가 도는 동안) `secrets.sh`. `secrets.sh` 는 네임스페이스가 생길 때까지 기다린다.
@@ -195,7 +198,8 @@ Application 을 지우는 것으로는 정리되지 않는다. cgv-infra 의 App
 
 ## 알려진 한계
 
-- 퍼블릭 서브넷만 쓰고 NAT 가 없다. 노드에 공인 IP 가 붙고, 인바운드는 보안 그룹이 좁힌다(노드 보안 그룹은 클러스터 안에서 오는 것만, ALB 는 집 공인 IP 와 부하 발생기만). prd 는 노드 · RDS · ElastiCache 를 프라이빗 서브넷에 두고 AZ 마다 NAT 를 둔다. stg 에서 안 한 이유 — NAT 하나는 그 AZ 가 죽을 때 다른 AZ 노드의 나가는 길까지 끊겨 AZ 셋 설계와 어긋나고, AZ 마다 두면 하루 약 $1.4 에 처리 요금(GB 당 $0.059)이 붙으며 cgv-infra NetworkPolicy 의 대역도 퍼블릭(ALB) · 프라이빗(DB)으로 다시 나눠야 한다.
+- 퍼블릭 서브넷만 쓰고 NAT 가 없다. 노드에 공인 IP 가 붙고, 인바운드는 보안 그룹이 좁힌다(노드 보안 그룹은 클러스터 안에서 오는 것만, 서비스 ALB 는 인터넷 전체, Grafana ALB 는 집 공인 IP 만). prd 는 노드 · RDS · ElastiCache 를 프라이빗 서브넷에 두고 AZ 마다 NAT 를 둔다. stg 에서 안 한 이유 — NAT 하나는 그 AZ 가 죽을 때 다른 AZ 노드의 나가는 길까지 끊겨 AZ 셋 설계와 어긋나고, AZ 마다 두면 하루 약 $1.4 에 처리 요금(GB 당 $0.059)이 붙으며 cgv-infra NetworkPolicy 의 대역도 퍼블릭(ALB) · 프라이빗(DB)으로 다시 나눠야 한다.
+- 서비스 ALB 가 80 평문으로 인터넷 전체에 열린다. 도메인 · 인증서가 없어 HTTPS 를 못 붙인다(ACM 은 도메인이 있어야 한다). 로그인 · 개인정보가 없는 데모 서비스이고, 초기화 API 둘은 cgv-infra 의 frontend Ingress 가 ALB 에서 403 으로 끊는다. 밖의 트래픽(봇 · 스캐너)이 부하 판 숫자에 섞일 수 있다 — 판을 돌리는 동안 ALB 요청 수를 부하 발생기가 보낸 수와 맞춰 본다. prd 는 도메인 + ACM + HTTPS 에 WAF 를 둔다.
 - EKS API 의 허용 IP 는 apply 시점의 집 공인 IP 다. 집 IP 가 바뀌면 다시 apply 해야 허브 ArgoCD 와 kubectl 이 붙는다.
 - CI 가 ECR 에 올리는 자격은 IAM 사용자의 장기 액세스 키다. GitLab 이 사설 IP 라 AWS 가 GitLab 을 OIDC 발급자로 검증할 수 없다.
 - 노드 수가 고정이다(오토스케일링 없음).

@@ -114,3 +114,33 @@ resource "aws_iam_role_policy_attachment" "alb" {
   role       = aws_iam_role.irsa["alb"].name
   policy_arn = aws_iam_policy.alb.arn
 }
+
+# ---------- CloudWatch exporter ----------
+# RDS · ElastiCache · ALB · EBS 는 클러스터 안의 파드가 아니라 exporter 를 옆에 붙일 수 없다.
+# 지표가 CloudWatch 에만 있어서 exporter(YACE)가 API 로 읽어 Prometheus 형식으로 내놓는다. 읽기뿐이다.
+#   tag:GetResources         자원을 태그로 찾는다 — 태그가 없는 자원은 안 보인다(modules/data 의 Name 태그)
+#   cloudwatch:*Metric*      지표를 읽는다
+# 이 동작들은 자원 ARN 으로 좁힐 수 없어서 resources 가 * 다.
+
+data "aws_iam_policy_document" "cloudwatch" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "tag:GetResources",
+      "cloudwatch:GetMetricData",
+      "cloudwatch:GetMetricStatistics",
+      "cloudwatch:ListMetrics",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "cloudwatch" {
+  name   = "${var.prefix}-cloudwatch"
+  policy = data.aws_iam_policy_document.cloudwatch.json
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch" {
+  role       = aws_iam_role.irsa["cloudwatch"].name
+  policy_arn = aws_iam_policy.cloudwatch.arn
+}

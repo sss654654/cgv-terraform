@@ -66,8 +66,9 @@ locals {
       "observability:loki",
       "observability:tempo",
     ]
-    "ebs-csi" = ["kube-system:ebs-csi-controller-sa"]
-    "alb"     = ["kube-system:aws-load-balancer-controller"]
+    "ebs-csi"    = ["kube-system:ebs-csi-controller-sa"]
+    "alb"        = ["kube-system:aws-load-balancer-controller"]
+    "cloudwatch" = ["observability:cloudwatch-exporter"]
   }
 }
 

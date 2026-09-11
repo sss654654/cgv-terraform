@@ -101,6 +101,9 @@ resource "aws_db_instance" "this" {
   # ★ 그리고 그래서 booking 을 여러 대로 못 늘린다 — 동시에 뜨면 DDL 이 부딪힌다.
 
   apply_immediately = true
+
+  # CloudWatch exporter(YACE)가 자원을 태그 API 로 찾는다. 태그가 하나도 없는 자원은 거기 안 나온다.
+  tags = { Name = var.prefix }
 }
 
 # ---------- Redis ----------
@@ -146,6 +149,9 @@ resource "aws_elasticache_replication_group" "this" {
   subnet_group_name    = aws_elasticache_subnet_group.this.name
   parameter_group_name = aws_elasticache_parameter_group.this.name
   security_group_ids   = [aws_security_group.data.id]
+
+  # CloudWatch exporter(YACE)가 자원을 태그 API 로 찾는다. 태그가 하나도 없는 자원은 거기 안 나온다.
+  tags = { Name = var.prefix }
 
   # TLS 를 켜면 Redis CPU 를 10-30% 더 쓴다. 1코어가 이 설계의 절대 상한이라
   # 병목을 지목하는 판에 변수가 하나 느는 셈이다. t 계열을 피하는 것과 같은 이유다.

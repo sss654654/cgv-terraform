@@ -42,6 +42,18 @@ variable "prefix" {
   default = "cgv-stg"
 }
 
+# 값은 저장소에 두지 않는다. `bootstrap/terraform.tfvars` 에 적으면 .gitignore 가 제외한다.
+variable "budget_email" {
+  type        = string
+  description = "예산 경보를 받을 주소"
+}
+
+variable "monthly_budget_usd" {
+  type        = string
+  default     = "50"
+  description = "월 한도(USD)"
+}
+
 data "aws_caller_identity" "current" {}
 
 locals {
@@ -274,6 +286,49 @@ resource "aws_iam_user_policy" "image_updater" {
       },
     ]
   })
+}
+
+# ---------- 비용 경보 ----------
+# 켜 둔 시간이 그대로 요금이라, 지우는 것을 잊었을 때 알아차릴 장치를 둔다.
+# 이 예산은 감시만 하고 자원을 건드리지 않는다(예산 작업 · SNS 없이 메일만).
+# ★ 켜 둔 동안의 감시로는 못 쓴다 — 비용 데이터가 하루 세 번까지만 갱신되고 8-12시간 늦는다.
+#   켜는 중에 쓰는 값은 결제 콘솔의 사용량이 아니라 켠 시각이다.
+
+resource "aws_budgets_budget" "monthly" {
+  name         = "${var.prefix}-monthly"
+  budget_type  = "COST"
+  time_unit    = "MONTHLY"
+  limit_amount = var.monthly_budget_usd
+  limit_unit   = "USD"
+
+  # 크레딧을 빼기 전 금액으로 본다. 빼고 보면 크레딧이 남아 있는 동안 사용액이 0 에 가깝게 보여
+  # 한 판에 얼마가 드는지가 안 드러나고, 크레딧이 떨어지는 달에 갑자기 한도에 닿는다.
+  cost_types {
+    include_credit = false
+    use_blended    = false
+  }
+
+  # 실제 사용액 기준 셋. 한 판이 약 $21 이라 두 번째 판에서 80% 에 닿는다.
+  dynamic "notification" {
+    for_each = [50, 80, 100]
+
+    content {
+      notification_type          = "ACTUAL"
+      comparison_operator        = "GREATER_THAN"
+      threshold_type             = "PERCENTAGE"
+      threshold                  = notification.value
+      subscriber_email_addresses = [var.budget_email]
+    }
+  }
+
+  # 이달 말 예상치 기준 하나. 지우는 것을 잊어 계속 켜져 있으면 실제 사용액이 한도에 닿기 전에 온다.
+  notification {
+    notification_type          = "FORECASTED"
+    comparison_operator        = "GREATER_THAN"
+    threshold_type             = "PERCENTAGE"
+    threshold                  = 100
+    subscriber_email_addresses = [var.budget_email]
+  }
 }
 
 # ---------- 출력 ----------

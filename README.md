@@ -47,7 +47,7 @@ modules/data/      RDS · ElastiCache · 보안 그룹
 
 | state | 무엇 | 지우나 |
 |---|---|---|
-| `bootstrap/` | tfstate 버킷 · 관측 버킷 셋(Mimir · Loki · Tempo) · ECR 셋 · IAM 사용자 둘(CI push · 이미지 태그 조회) | 지우지 않는다 |
+| `bootstrap/` | tfstate 버킷 · 관측 버킷 셋(Mimir · Loki · Tempo) · ECR 셋 · IAM 사용자 둘(CI push · 이미지 태그 조회) · 월 예산 경보 | 지우지 않는다 |
 | `envs/stg/` | VPC · EKS · 노드 · 애드온 · IRSA · RDS · ElastiCache · 부하 발생기 | 하루 살고 지운다 |
 
 - 한 state 에 두면 `destroy` 한 번에 판 결과(관측 블록)와 이미지까지 사라진다. 판과 판을 비교하려면 결과가 클러스터보다 오래 살아야 한다.
@@ -140,7 +140,15 @@ OIDC 공급자를 등록하면 IAM 이 그 서명을 믿는다. 역할의 신뢰
 
 ### 공통 태그와 기본값에 맡기지 않은 것
 
-모든 자원에 `Project=cgv` · `Environment=stg`(bootstrap 은 `shared`) · `ManagedBy=terraform` 을 붙인다. 비용 보고서에서 `Environment=stg` 로 하루 환경의 비용을 거른다(결제 콘솔에서 비용 할당 태그로 한 번 활성화해야 한다).
+모든 자원에 `Project=cgv` · `Environment=stg`(bootstrap 은 `shared`) · `ManagedBy=terraform` 을 붙인다. 비용 보고서에서 `Environment=stg` 로 하루 환경의 비용을 거른다. 태그를 붙이는 것과 비용을 태그로 가르는 것은 따로다 — 결제 쪽에서 한 번 활성화해야 보고서에 칸이 생긴다.
+
+```
+aws ce list-cost-allocation-tags --status Inactive
+aws ce update-cost-allocation-tags-status \
+  --cost-allocation-tags-status TagKey=Project,Status=Active TagKey=Environment,Status=Active
+```
+
+태그가 붙은 자원이 만들어진 뒤에야 키가 목록에 뜨고(하루까지), 활성화한 뒤에도 보고서에 반영되기까지 하루가 더 걸린다. 활성화 시점 이전의 비용은 태그로 갈리지 않는다.
 provider 의 `default_tags` 가 안 닿는 곳 — 노드 EC2 · 루트 볼륨, EBS CSI 볼륨, ALB Controller 가 만드는 ALB — 은 각자 따로 붙인다(ALB 는 cgv-infra 의 컨트롤러 값).
 
 | 항목 | 값 | 적지 않으면 |
@@ -159,7 +167,12 @@ provider 의 `default_tags` 가 안 닿는 곳 — 노드 EC2 · 루트 볼륨, 
 
 ### 처음 한 번 — bootstrap
 
-`bootstrap/` 에서 `terraform apply`. 그 뒤 콘솔에서 IAM 사용자 둘의 액세스 키를 발급해 GitLab CI 변수(ECR push)와 cgv-infra 봉인본(이미지 태그 조회)에 넣는다.
+`bootstrap/terraform.tfvars` 에 경보를 받을 주소를 적는다(`budget_email`. 이 파일은 `.gitignore` 대상이라 저장소에 안 들어간다). 그다음 `bootstrap/` 에서 `terraform apply`.
+
+그 뒤 두 가지가 남는다.
+
+- 콘솔에서 IAM 사용자 둘의 액세스 키를 발급해 GitLab CI 변수(ECR push)와 cgv-infra 봉인본(이미지 태그 조회)에 넣는다.
+- 비용 할당 태그를 활성화한다(아래 "공통 태그" 절). 자원이 한 번은 만들어져야 태그 키가 목록에 뜨므로, 켜는 날보다 앞서 해 둔다.
 
 ### 켜는 날
 

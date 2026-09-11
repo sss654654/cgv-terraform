@@ -195,7 +195,7 @@ Application 을 지우는 것으로는 정리되지 않는다. cgv-infra 의 App
 
 ## 알려진 한계
 
-- 퍼블릭 서브넷만 쓰고 NAT 가 없다. 노드에 공인 IP 가 붙고, 인바운드는 보안 그룹이 좁힌다.
+- 퍼블릭 서브넷만 쓰고 NAT 가 없다. 노드에 공인 IP 가 붙고, 인바운드는 보안 그룹이 좁힌다(노드 보안 그룹은 클러스터 안에서 오는 것만, ALB 는 집 공인 IP 와 부하 발생기만). prd 는 노드 · RDS · ElastiCache 를 프라이빗 서브넷에 두고 AZ 마다 NAT 를 둔다. stg 에서 안 한 이유 — NAT 하나는 그 AZ 가 죽을 때 다른 AZ 노드의 나가는 길까지 끊겨 AZ 셋 설계와 어긋나고, AZ 마다 두면 하루 약 $1.4 에 처리 요금(GB 당 $0.059)이 붙으며 cgv-infra NetworkPolicy 의 대역도 퍼블릭(ALB) · 프라이빗(DB)으로 다시 나눠야 한다.
 - EKS API 의 허용 IP 는 apply 시점의 집 공인 IP 다. 집 IP 가 바뀌면 다시 apply 해야 허브 ArgoCD 와 kubectl 이 붙는다.
 - CI 가 ECR 에 올리는 자격은 IAM 사용자의 장기 액세스 키다. GitLab 이 사설 IP 라 AWS 가 GitLab 을 OIDC 발급자로 검증할 수 없다.
 - 노드 수가 고정이다(오토스케일링 없음).

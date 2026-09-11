@@ -105,8 +105,8 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot     = true
   deletion_protection     = false
 
-  # 스키마를 Hibernate 가 만든다(Flyway 가 없다). 빈 데이터베이스로 나와도 booking 이 뜨면서 만든다.
-  # ★ 그리고 그래서 booking 을 여러 대로 못 늘린다 — 동시에 뜨면 DDL 이 부딪힌다.
+  # 스키마와 시드는 booking 의 Flyway 가 기동 때 만든다. 빈 데이터베이스(db_name)로 나오면 V1 · V2 가 적용된다.
+  #   Flyway 가 DB 잠금 아래에서 한 대만 적용해 booking 을 여러 대로 띄울 수 있다(cgv-infra stg 는 두 대).
 
   apply_immediately = true
 

@@ -135,4 +135,7 @@ module "data" {
   redis_version          = var.redis_version
   redis_node_type        = var.redis_node_type
   redis_parameter_family = var.redis_parameter_family
+
+  rds_multi_az   = var.rds_multi_az
+  redis_replicas = var.redis_replicas
 }

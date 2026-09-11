@@ -18,13 +18,18 @@ variable "prefix" {
 
 variable "azs" {
   description = <<-EOT
-    서브넷을 놓을 가용 영역 둘. 목록의 앞 둘을 자동으로 집지 않는다 —
-    AZ 마다 제공하는 인스턴스 타입이 다르고, 없는 곳이 걸리면 노드그룹이 만들어지다 멈춘다.
+    서브넷을 놓을 가용 영역 셋. Kafka 브로커 셋을 AZ 마다 하나씩 두려고 셋이다.
+      브로커 셋이 KRaft 컨트롤러 과반 투표와 min.insync.replicas 2 를 겸한다. AZ 둘에 나누면 한쪽에
+      둘이 가고, 그 AZ 가 죽으면 하나만 남아 리더를 못 뽑고 쓰기가 거부된다. AZ 셋이면 어느 AZ 가 죽어도 둘이 남는다.
+      RDS · ElastiCache 는 AWS 가 밖에서 전환을 정해 이 중 두 AZ 를 쓴다.
+    목록 순서가 서브넷 CIDR 순번이다(modules/network) — 새 AZ 는 끝에 더해야 기존 서브넷이 그대로 남는다.
+    목록의 앞을 자동으로 집지 않는다 — AZ 마다 제공하는 인스턴스 타입이 다르고, 없는 곳이 걸리면
+    노드그룹이 만들어지다 멈춘다. m5.xlarge · c5.4xlarge 는 서울 네 AZ 모두 제공한다(2026-09-11 조회).
     바꾸기 전에 확인: aws ec2 describe-instance-type-offerings --location-type availability-zone
                      --filters Name=instance-type,Values=m5.xlarge --region ap-northeast-2
   EOT
   type        = list(string)
-  default     = ["ap-northeast-2a", "ap-northeast-2c"]
+  default     = ["ap-northeast-2a", "ap-northeast-2c", "ap-northeast-2b"]
 }
 
 variable "vpc_cidr" {
@@ -125,6 +130,25 @@ variable "redis_node_type" {
   EOT
   type        = string
   default     = "cache.m5.large"
+}
+
+variable "rds_multi_az" {
+  description = <<-EOT
+    RDS 를 Multi-AZ(다른 AZ 에 동기 복제 대기)로 둔다. 커밋이 대기의 기록까지 기다려 쓰기 지연이 는다.
+    prd 는 Multi-AZ 로 둔다. 단일 AZ 로 재면 booking 확정의 DB 시간이 prd 보다 짧게 나와 스펙이 어긋난다.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "redis_replicas" {
+  description = <<-EOT
+    ElastiCache 복제본 수. 1 이면 다른 AZ 에 복제본을 두고 자동 전환을 켠다.
+    처리량을 위한 것이 아니다(복제본은 읽기를 안 받는다). Kafka 는 AZ 셋으로 AZ 장애를 견디는데
+    Redis 가 한 AZ 에만 있으면 그 AZ 가 죽을 때 서비스가 멈춰 AZ 설계가 한쪽만 성립한다.
+  EOT
+  type        = number
+  default     = 1
 }
 
 # ---------- 부하 발생기 ----------

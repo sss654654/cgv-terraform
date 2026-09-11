@@ -9,7 +9,7 @@ variable "kubernetes_version" {
 }
 
 variable "subnet_ids" {
-  description = "서로 다른 AZ 의 서브넷 둘. EKS 가 요구하는 최소다."
+  description = "서로 다른 AZ 의 서브넷(EKS 는 최소 둘을 요구한다). 노드그룹이 이 서브넷들에 노드를 AZ 별로 고르게 띄운다."
   type        = list(string)
 }
 

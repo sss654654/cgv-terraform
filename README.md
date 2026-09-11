@@ -202,6 +202,6 @@ Application 을 지우는 것으로는 정리되지 않는다. cgv-infra 의 App
 - 서비스 ALB 가 80 평문으로 인터넷 전체에 열린다. 도메인 · 인증서가 없어 HTTPS 를 못 붙인다(ACM 은 도메인이 있어야 한다). 로그인 · 개인정보가 없는 데모 서비스이고, 초기화 API 둘은 cgv-infra 의 frontend Ingress 가 ALB 에서 403 으로 끊는다. 밖의 트래픽(봇 · 스캐너)이 부하 판 숫자에 섞일 수 있다 — 판을 돌리는 동안 ALB 요청 수를 부하 발생기가 보낸 수와 맞춰 본다. prd 는 도메인 + ACM + HTTPS 에 WAF 를 둔다.
 - EKS API 의 허용 IP 는 apply 시점의 집 공인 IP 다. 집 IP 가 바뀌면 다시 apply 해야 허브 ArgoCD 와 kubectl 이 붙는다.
 - CI 가 ECR 에 올리는 자격은 IAM 사용자의 장기 액세스 키다. GitLab 이 사설 IP 라 AWS 가 GitLab 을 OIDC 발급자로 검증할 수 없다.
-- 노드 수가 고정이다(오토스케일링 없음).
+- 노드 수가 고정이다(앱 m5.xlarge 4대, 오토스케일링 없음). 병목 판의 목적이 "무엇이 먼저 막히나" 를 지목하는 것인데, 노드가 스스로 늘면 그 막힘이 가려진다. 5만 기준 request 합이 4대의 37% 라 HPA 최대치까지 들어가고, 파드가 Pending 이 되면 그것이 "노드가 먼저 막혔다" 는 판정이다. 탄력성은 파드 HPA 로 보이고, prd 는 노드도 Karpenter 로 늘린다.
 - `bootstrap` state 는 로컬 파일 하나다. 잃으면 이름이 결정적이라 `terraform import` 로 되살린다(시도해 본 적은 없다).
 - RDS · ElastiCache 보안 그룹은 **노드** 보안 그룹에서 오는 것을 받는다. 보안 그룹은 노드의 네트워크 인터페이스에 붙어 노드 위 어느 파드든 통과한다 — 온프레미스에서 DB 파드에 걸었던 "booking · queue 파드만 받는다" 는 입구 규칙이 여기서는 노드 단위로 느슨해진다. 파드 단위 구분은 cgv-infra 의 앱 쪽 출구 NetworkPolicy 하나가 맡는다(VPC CNI 에이전트가 실제로 막는지는 켜는 날 음성 시험으로 확인한다). prd 는 Security Groups for Pods 로 파드에 보안 그룹을 붙이고 DB 보안 그룹의 출처를 그 보안 그룹으로 좁힌다.

@@ -234,12 +234,14 @@ resource "aws_eks_node_group" "observability" {
 locals {
   # 애드온 버전. 적지 않으면 apply 할 때 AWS 가 고른 버전이 들어가 켤 때마다 달라질 수 있다.
   #   값은 aws eks describe-addon-versions --kubernetes-version 1.36 의 기본 버전(defaultVersion)이다
-  #   (2026-09-11 조회). 클러스터 버전을 올리면 같은 명령으로 다시 고른다.
+  #   (2026-09-12 조회). 클러스터 버전을 올리면 같은 명령으로 다시 고른다.
+  #   기본 버전은 하루 사이에도 바뀐다 — 09-11 과 09-12 사이에 다섯 중 셋이 올라갔다.
+  #   옛 값도 apply 는 되지만(목록에서 안 빠진다), 켜는 날 아침에 같은 명령으로 한 번 더 맞춘다.
   addon_versions = {
     "vpc-cni"            = "v1.22.4-eksbuild.3"
-    "kube-proxy"         = "v1.36.0-eksbuild.17"
-    "coredns"            = "v1.14.3-eksbuild.14"
-    "aws-ebs-csi-driver" = "v1.65.0-eksbuild.2"
+    "kube-proxy"         = "v1.36.0-eksbuild.21"
+    "coredns"            = "v1.14.3-eksbuild.16"
+    "aws-ebs-csi-driver" = "v1.66.0-eksbuild.1"
     "metrics-server"     = "v0.9.0-eksbuild.10"
   }
 }

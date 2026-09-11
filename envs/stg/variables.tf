@@ -91,6 +91,9 @@ variable "mysql_version" {
     연장 지원으로만 만들 수 있고 요금이 붙는다(Multi-AZ 대기에도). 9.x 는 RDS 운영 환경에 없다.
     집(dev)은 9.4 라 버전이 다르다. booking 의 Flyway 11.7 은 MySQL 8.1 까지 공식 지원이라
     9.4 에서 "시험 안 된 버전" 경고를 냈다(동작은 했다). 8.4 에서도 같은 경고가 날 수 있다.
+    메이저.마이너까지만 적는다 — RDS 가 그 계열의 기본 패치를 고른다.
+    `aws rds describe-db-engine-versions --engine mysql --engine-version 8.4 --default-only`
+    로 2026-09-12 에 고른 값이 8.4.9 다.
   EOT
   type        = string
   default     = "8.4"

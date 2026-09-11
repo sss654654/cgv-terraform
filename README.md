@@ -134,6 +134,7 @@ OIDC 공급자를 등록하면 IAM 이 그 서명을 믿는다. 역할의 신뢰
   - ElastiCache 복제본은 처리량에 안 보탠다(앱이 주 엔드포인트만 쓴다). Kafka 를 AZ 셋에 두어 AZ 장애를 견디게 한 것과 짝을 맞춰, 한 AZ 가 죽어도 데이터 계층이 남게 한다(`redis_replicas`). 복제가 비동기라 전환 순간 마지막 쓰기는 잃을 수 있다.
 - 둘 다 대기(복제본)는 읽기를 받지 않는다. 처리 능력을 늘리는 것은 인스턴스를 키우거나 읽기 복제본을 따로 두는 일이다.
 - RDS 비밀번호는 사람이 정하지 않는다. AWS 가 만들어 Secrets Manager 에 넣고(`manage_master_user_password`), Terraform 은 값을 받지 않아 state 에 남지 않는다. cgv-infra 의 `secrets.sh` 가 그 시크릿을 읽어 쿠버네티스 Secret 으로 옮긴다.
+- 이 보안 그룹에는 아웃바운드 규칙이 없다. Terraform 은 보안 그룹을 만들 때 AWS 가 넣는 "전체 허용" 아웃바운드 기본 규칙을 지우고, 코드에 적은 것만 남긴다. 보안 그룹은 상태를 기억해서 들어온 연결의 응답은 아웃바운드 규칙 없이 나가므로 앱 → RDS · Redis 는 이 상태로 성립한다.
 - 둘 다 노드 보안 그룹에서만 3306 · 6379 로 들어온다. 전송 구간 암호화는 둘 다 쓰지 않는다 — MySQL 은 담기는 것이 데모 시드와 가상 사용자 예매뿐이라(`require_secure_transport=0`), Redis 는 TLS 가 명령 처리 코어를 더 써서 병목을 가리는 판에 변수가 하나 늘어서다.
 - Kafka 는 관리형(MSK)으로 옮기지 않고 파드(Strimzi)로 둔다.
 - 백업 · 최종 스냅숏 · 삭제 방지는 하루 켰다 지우는 환경이라 두지 않는다.
@@ -205,6 +206,8 @@ kubectl 이 들어가는 곳은 켜는 날 준비(스크립트 둘)와 지울 �
    Ingress 가 지워지며 ALB Controller 가 ALB 를, PVC 가 지워지며 EBS CSI 가 볼륨을 지운다. 콘솔에서 ALB · EBS 가 사라졌는지 확인한다
 4. `envs/stg` 에서 `terraform destroy`
 5. stg 를 켠 커밋을 되돌린다(곧 다시 켤 거면 되돌리지 않고 주소만 바꾼다)
+
+RDS 가 만든 마스터 암호 시크릿은 Terraform 자원이 아니라 destroy 가 손대지 않는데, 인스턴스를 지우면 AWS 가 시크릿과 그 메타데이터를 같이 지운다(RDS 문서 "Password management with Amazon RDS and AWS Secrets Manager"). 따로 지울 것이 없다.
 
 Application 을 지우는 것으로는 정리되지 않는다. cgv-infra 의 ApplicationSet 이 `preserveResourcesOnDeletion` 이고 직속 Application 에는 finalizer 가 없어서, Application 이 지워져도 Ingress · PVC 가 남는다.
 그 상태로 destroy 하면 Terraform 밖에서 생긴 ALB · EBS 가 서브넷에 붙어 있어 삭제가 막힌다.

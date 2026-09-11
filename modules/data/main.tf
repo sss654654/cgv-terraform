@@ -55,8 +55,9 @@ resource "aws_db_parameter_group" "this" {
   name   = var.prefix
   family = var.rds_parameter_family
 
-  # booking 의 JDBC URL 에 useSSL=false 가 리터럴로 고정돼 있어(application.yml:42)
-  # 환경변수로 못 바꾼다. 이 값이 1 이면 붙지 못한다.
+  # booking 은 JDBC 전송 암호화를 쓰지 않는다(URL 의 useSSL=false). 담기는 것이 데모 시드와 가상 사용자의
+  # 예매뿐이라 암호화로 지킬 데이터가 없다. 이 값이 1 이면 평문 접속이 거부되어 booking 이 붙지 못한다.
+  # 켜는 환경이라면 booking 쪽은 SPRING_DATASOURCE_URL 로 URL 전체를 덮어 sslMode 와 CA 를 준다.
   # 기본값도 0 이지만, 적어 두면 "띄운 뒤에 확인할 것" 이 "정한 값" 이 된다.
   parameter {
     name  = "require_secure_transport"
@@ -91,8 +92,10 @@ resource "aws_db_instance" "this" {
   # 퍼블릭 서브넷에 있지만 밖에서 직접 못 붙는다. 노드를 거쳐야 한다.
   publicly_accessible = false
 
-  # 하루 켰다 지우는 환경이다. 이중화도 백업도 안 한다.
-  multi_az                = false
+  # 대기 인스턴스를 다른 AZ 에 두고 동기로 복제한다(var.rds_multi_az). 대기는 읽기를 받지 않아 처리 능력은
+  # 그대로고, 커밋이 대기의 기록까지 기다려 쓰기 지연이 는다 — 그 지연까지 prd 와 같은 조건으로 재려고 켠다.
+  # 백업 · 최종 스냅숏 · 삭제 방지는 하루 켰다 지우는 환경이라 두지 않는다.
+  multi_az                = var.rds_multi_az
   backup_retention_period = 0
   skip_final_snapshot     = true
   deletion_protection     = false
@@ -141,10 +144,11 @@ resource "aws_elasticache_replication_group" "this" {
   # ★ cluster_enabled 는 적을 수 없는 값이다. num_node_groups 를 안 쓰면 자동으로 꺼진다.
   #   아래 num_cache_clusters 를 쓰는 것 자체가 "샤딩 안 함" 을 뜻한다.
 
-  # 복제본 0. 집에서 슬레이브 둘이 처리량에 안 보탰다 — 읽기까지 마스터로 갔다.
-  # FailoverOptions 에 ReplicaOnly 도 RouteByLatency 도 없어서 그렇다.
-  # 넘겨받기만 하는 구성이라 줄여도 처리량이 같다. Kafka 와 반대 결론이 나오는 지점이다.
-  num_cache_clusters = 1
+  # 주 1 + 복제본 var.redis_replicas. 복제본은 처리량에 안 보탠다 — 집에서 슬레이브 둘이 처리량에 안 보탰다
+  # (FailoverOptions 에 ReplicaOnly 도 RouteByLatency 도 없어 읽기까지 마스터로 갔다). 여기서도 앱은 주
+  # 엔드포인트 하나만 쓴다. 두는 이유는 넘겨받기다 — 주 노드나 그 AZ 가 죽으면 다른 AZ 의 복제본이 주가 된다.
+  # Kafka 를 AZ 셋에 두어 AZ 장애를 견디게 한 것과 짝을 맞춘다. 복제가 비동기라 전환 순간 마지막 쓰기는 잃을 수 있다.
+  num_cache_clusters = 1 + var.redis_replicas
 
   subnet_group_name    = aws_elasticache_subnet_group.this.name
   parameter_group_name = aws_elasticache_parameter_group.this.name
@@ -160,8 +164,12 @@ resource "aws_elasticache_replication_group" "this" {
   at_rest_encryption_enabled = true
 
   # 하루 켰다 지운다.
-  snapshot_retention_limit   = 0
-  automatic_failover_enabled = false
+  snapshot_retention_limit = 0
+
+  # 복제본이 있을 때만 켤 수 있다. multi_az 는 자동 전환이 켜져 있어야 쓸 수 있고, 복제본을 주와 다른 AZ 에 둔다.
+  #   전환하면 주 엔드포인트(redis_host)가 새 주를 가리킨다 — 앱은 주소를 바꾸지 않고 다시 붙는다.
+  automatic_failover_enabled = var.redis_replicas > 0
+  multi_az_enabled           = var.redis_replicas > 0
 
   apply_immediately = true
 }

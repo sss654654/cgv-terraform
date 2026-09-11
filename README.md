@@ -14,11 +14,11 @@ CGV 예매 대기열 서비스의 **stg 환경을 AWS 에 만드는 Terraform** 
                                              (public, 집 공인 IP 만)
   브라우저 ── HTTP 80 (집 공인 IP 만) ─────────────────────────▶ ALB
 
-AWS ap-northeast-2 · VPC 10.20.0.0/16 · 퍼블릭 서브넷 2a · 2c · NAT 없음
+AWS ap-northeast-2 · VPC 10.20.0.0/16 · 퍼블릭 서브넷 2a · 2c · 2b · NAT 없음
   ALB  (cgv-infra 의 Ingress 를 보고 ALB Controller 가 만든다)
-   └▶ 앱 노드그룹 m5.xlarge × 4        queue · booking · frontend · Kafka(Strimzi)
-        ├▶ RDS MySQL 8.0 db.m5.large            ┐ 노드 보안 그룹에서만 들어온다
-        └▶ ElastiCache Redis 7.1 cache.m5.large ┘
+   └▶ 앱 노드그룹 m5.xlarge × 4 (AZ 셋에 2+1+1)   queue · booking · frontend · Kafka(Strimzi, AZ 마다 브로커 하나)
+        ├▶ RDS MySQL 8.0 db.m5.large Multi-AZ (주 + 대기)            ┐ 노드 보안 그룹에서만 들어온다
+        └▶ ElastiCache Redis 7.1 cache.m5.large (주 + 복제본, 자동 전환) ┘
   관측 노드그룹 m5.xlarge × 1 (taint)  Mimir · Loki · Tempo · Grafana · Alloy · YACE
         └▶ S3 관측 버킷 셋 (IRSA)       ← bootstrap 이 만들고 지우지 않는다
   부하 발생기 c5.4xlarge (판을 돌릴 때만) ──▶ ALB
@@ -57,7 +57,10 @@ modules/data/      RDS · ElastiCache · 보안 그룹
 
 ### 네트워크
 
-- 퍼블릭 서브넷 둘(AZ 2a · 2c)만 쓰고 NAT 게이트웨이를 두지 않는다. 노드는 IGW 로 직접 나가고 공인 IP 가 붙는다. 들어오는 쪽은 보안 그룹이 좁힌다.
+- 퍼블릭 서브넷 셋(AZ 2a · 2c · 2b)을 쓰고 NAT 게이트웨이를 두지 않는다. 노드는 IGW 로 직접 나가고 공인 IP 가 붙는다. 들어오는 쪽은 보안 그룹이 좁힌다.
+- AZ 가 셋인 이유는 Kafka 다. 브로커 셋이 컨트롤러 과반 투표와 `min.insync.replicas` 2 를 겸해서, AZ 둘에 나누면 한쪽에 둘이 가고 그 AZ 가 죽으면 리더를 못 뽑아 쓰기가 멈춘다. AZ 마다 하나씩 두면(cgv-infra 의 zone 분산 규칙) 어느 AZ 가 죽어도 둘이 남는다.
+  앱 파드 · RDS · ElastiCache 는 AZ 둘이면 된다. 앱 파드는 서로 대체되고, RDS · ElastiCache 는 AWS 가 밖에서 전환을 정한다.
+- 서브넷 CIDR 은 `azs` 목록 순번으로 자른다. 새 AZ 는 목록 끝에 더해야 기존 서브넷이 바뀌지 않는다.
 - ALB 보안 그룹은 80 을 두 곳에만 연다. 집 공인 IP(/32)와 VPC 안(부하 발생기).
 - 서브넷의 `kubernetes.io/role/elb` · `kubernetes.io/cluster/cgv-stg` 태그를 보고 ALB Controller 가 ALB 를 놓을 자리를 찾는다.
 
@@ -119,13 +122,17 @@ OIDC 공급자를 등록하면 IAM 이 그 서명을 믿는다. 역할의 신뢰
 
 | | 구성 | 집에서는 |
 |---|---|---|
-| RDS MySQL 8.0 | db.m5.large · 단일 AZ · 20 GiB gp3 암호화 · 퍼블릭 접근 없음 · 백업 없음 | data 네임스페이스의 MySQL 파드 |
-| ElastiCache Redis 7.1 | cache.m5.large 1대 · 클러스터 모드 끔 · 전송 구간 암호화 없음(AUTH 없음) | Sentinel HA 파드 |
+| RDS MySQL 8.0 | db.m5.large · Multi-AZ(다른 AZ 에 동기 복제 대기) · 20 GiB gp3 암호화 · 퍼블릭 접근 없음 · 백업 없음 | data 네임스페이스의 MySQL 파드 |
+| ElastiCache Redis 7.1 | cache.m5.large 주 1 + 복제본 1 · 자동 전환(다른 AZ) · 클러스터 모드 끔 · 전송 구간 암호화 없음(AUTH 없음) | Sentinel HA 파드 |
 
+- 이중화를 켠다. 이유가 둘 다 다르다.
+  - RDS Multi-AZ 는 커밋이 대기의 기록까지 기다려 쓰기 지연이 는다. prd 와 같은 조건에서 booking 확정의 DB 시간을 재려고 켠다(`rds_multi_az`).
+  - ElastiCache 복제본은 처리량에 안 보탠다(앱이 주 엔드포인트만 쓴다). Kafka 를 AZ 셋에 두어 AZ 장애를 견디게 한 것과 짝을 맞춰, 한 AZ 가 죽어도 데이터 계층이 남게 한다(`redis_replicas`). 복제가 비동기라 전환 순간 마지막 쓰기는 잃을 수 있다.
+- 둘 다 대기(복제본)는 읽기를 받지 않는다. 처리 능력을 늘리는 것은 인스턴스를 키우거나 읽기 복제본을 따로 두는 일이다.
 - RDS 비밀번호는 사람이 정하지 않는다. AWS 가 만들어 Secrets Manager 에 넣고(`manage_master_user_password`), Terraform 은 값을 받지 않아 state 에 남지 않는다. cgv-infra 의 `secrets.sh` 가 그 시크릿을 읽어 쿠버네티스 Secret 으로 옮긴다.
-- 둘 다 노드 보안 그룹에서만 3306 · 6379 로 들어온다.
+- 둘 다 노드 보안 그룹에서만 3306 · 6379 로 들어온다. 전송 구간 암호화는 둘 다 쓰지 않는다 — MySQL 은 담기는 것이 데모 시드와 가상 사용자 예매뿐이라(`require_secure_transport=0`), Redis 는 TLS 가 명령 처리 코어를 더 써서 병목을 가리는 판에 변수가 하나 늘어서다.
 - Kafka 는 관리형(MSK)으로 옮기지 않고 파드(Strimzi)로 둔다.
-- 하루 켰다 지우는 환경이라 이중화 · 백업 · 삭제 방지를 두지 않는다.
+- 백업 · 최종 스냅숏 · 삭제 방지는 하루 켰다 지우는 환경이라 두지 않는다.
 
 ### 공통 태그와 기본값에 맡기지 않은 것
 

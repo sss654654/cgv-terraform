@@ -9,7 +9,7 @@ variable "vpc_cidr" {
 }
 
 variable "azs" {
-  description = "서브넷을 놓을 가용 영역 둘. EKS 가 서로 다른 AZ 를 최소 둘 요구한다."
+  description = "서브넷을 놓을 가용 영역. EKS 는 서로 다른 AZ 를 최소 둘 요구한다. 목록 순번이 서브넷 CIDR 순번이다."
   type        = list(string)
 }
 

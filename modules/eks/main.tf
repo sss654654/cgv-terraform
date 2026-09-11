@@ -195,6 +195,18 @@ resource "aws_eks_addon" "ebs_csi" {
   depends_on = [aws_eks_node_group.app]
 }
 
+# metrics-server — HPA 와 kubectl top 이 읽는 지표 API(metrics.k8s.io)를 낸다.
+#   집 k3s 는 기본으로 깔아 줬고 EKS 는 안 깐다. stg queue 가 HPA(4-8대)를 쓰는데
+#   이것이 없으면 HPA 가 지표를 못 읽어(<unknown>) 대수가 최소값에서 안 움직인다.
+#   EKS 가 관리형 애드온으로 준다 — aws eks describe-addon-versions --addon-name metrics-server
+#   (kubernetes 1.33 · publisher eks 확인). 뜰 노드가 있어야 해서 노드그룹 뒤다.
+resource "aws_eks_addon" "metrics_server" {
+  cluster_name = aws_eks_cluster.this.name
+  addon_name   = "metrics-server"
+
+  depends_on = [aws_eks_node_group.app]
+}
+
 # ★ gp3 StorageClass 는 여기서 안 만든다.
 #   EBS CSI 애드온은 드라이버만 설치하고 StorageClass 를 만들지 않는다. EKS 에 기본으로 있는 것은
 #   gp2 하나라 이름이 gp3 인 것은 따로 만들어야 하는데, 그것은 쿠버네티스 오브젝트다.

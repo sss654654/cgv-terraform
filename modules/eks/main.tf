@@ -59,6 +59,12 @@ resource "aws_eks_cluster" "this" {
     bootstrap_cluster_creator_admin_permissions = true
   }
 
+  # 표준 지원만 쓴다. 기본값(EXTENDED)이면 표준 지원이 끝난 버전에서 연장 지원 요금이 붙은 채 계속 돈다.
+  #   STANDARD 면 표준 지원이 끝날 때 AWS 가 다음 버전으로 올린다 — 하루 켰다 지우는 클러스터라 올라갈 일이 없다.
+  upgrade_policy {
+    support_type = "STANDARD"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.cluster]
 }
 
@@ -227,14 +233,14 @@ resource "aws_eks_node_group" "observability" {
 
 locals {
   # 애드온 버전. 적지 않으면 apply 할 때 AWS 가 고른 버전이 들어가 켤 때마다 달라질 수 있다.
-  #   값은 aws eks describe-addon-versions --kubernetes-version 1.33 의 기본 버전(defaultVersion)이다
+  #   값은 aws eks describe-addon-versions --kubernetes-version 1.36 의 기본 버전(defaultVersion)이다
   #   (2026-09-11 조회). 클러스터 버전을 올리면 같은 명령으로 다시 고른다.
   addon_versions = {
     "vpc-cni"            = "v1.22.4-eksbuild.3"
-    "kube-proxy"         = "v1.33.10-eksbuild.21"
-    "coredns"            = "v1.12.4-eksbuild.29"
+    "kube-proxy"         = "v1.36.0-eksbuild.17"
+    "coredns"            = "v1.14.3-eksbuild.14"
     "aws-ebs-csi-driver" = "v1.65.0-eksbuild.2"
-    "metrics-server"     = "v0.8.1-eksbuild.19"
+    "metrics-server"     = "v0.9.0-eksbuild.10"
   }
 }
 
@@ -247,7 +253,7 @@ resource "aws_eks_addon" "vpc_cni" {
   # ★ NetworkPolicy 집행을 켠다.
   #   집에서는 Calico 가 집행했는데 VPC CNI 는 이 값이 꺼져 있으면 규칙을 읽고도 아무것도 안 막는다.
   #   객체는 Synced 이고 오류도 안 나서, 안 켜면 막고 있다고 믿은 채로 안 막힌다.
-  #   manifests/netpol-app · netpol-data · netpol-observability 가 그 대상이다.
+  #   cgv-infra 의 charts/platform/netpol(app · data · observability 정책)이 그 대상이다.
   configuration_values = jsonencode({
     enableNetworkPolicy = "true"
   })
@@ -292,7 +298,7 @@ resource "aws_eks_addon" "ebs_csi" {
 #   집 k3s 는 기본으로 깔아 줬고 EKS 는 안 깐다. stg queue 가 HPA(4-8대)를 쓰는데
 #   이것이 없으면 HPA 가 지표를 못 읽어(<unknown>) 대수가 최소값에서 안 움직인다.
 #   EKS 가 관리형 애드온으로 준다 — aws eks describe-addon-versions --addon-name metrics-server
-#   (kubernetes 1.33 · publisher eks 확인). 뜰 노드가 있어야 해서 노드그룹 뒤다.
+#   (kubernetes 1.36 · publisher eks 확인). 뜰 노드가 있어야 해서 노드그룹 뒤다.
 resource "aws_eks_addon" "metrics_server" {
   cluster_name  = aws_eks_cluster.this.name
   addon_name    = "metrics-server"

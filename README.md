@@ -17,7 +17,7 @@ CGV 예매 대기열 서비스의 **stg 환경을 AWS 에 만드는 Terraform** 
 AWS ap-northeast-2 · VPC 10.20.0.0/16 · 퍼블릭 서브넷 2a · 2c · 2b · NAT 없음
   ALB  (cgv-infra 의 Ingress 를 보고 ALB Controller 가 만든다)
    └▶ 앱 노드그룹 m5.xlarge × 4 (AZ 셋에 2+1+1)   queue · booking · frontend · Kafka(Strimzi, AZ 마다 브로커 하나)
-        ├▶ RDS MySQL 8.0 db.m5.large Multi-AZ (주 + 대기)            ┐ 노드 보안 그룹에서만 들어온다
+        ├▶ RDS MySQL 8.4 db.m5.large Multi-AZ (주 + 대기)            ┐ 노드 보안 그룹에서만 들어온다
         └▶ ElastiCache Redis 7.1 cache.m5.large (주 + 복제본, 자동 전환) ┘
   관측 노드그룹 m5.xlarge × 1 (taint)  Mimir · Loki · Tempo · Grafana · Alloy · YACE
         └▶ S3 관측 버킷 셋 (IRSA)       ← bootstrap 이 만들고 지우지 않는다
@@ -70,6 +70,7 @@ modules/data/      RDS · ElastiCache · 보안 그룹
 - API 는 public 이지만 허용 IP 가 하나다. apply 시점에 `checkip.amazonaws.com` 으로 조회한 집 공인 IP 라 코드에 IP 가 남지 않는다. 허브 ArgoCD 가 집에서 붙어야 해서 private 만으로는 안 된다.
 - 서비스 CIDR 172.20.0.0/16 을 지정한다. CoreDNS 가 그 대역의 열 번째(172.20.0.10)로 정해져, cgv-infra 의 nginx resolver 에 미리 적어 둘 수 있다.
 - `access_config` — 권한을 EKS access entry 로만 주고, apply 를 실행한 IAM 주체를 관리자로 둔다. cgv-infra 의 `bootstrap/eks/register.sh` 가 argocd-manager 를 만들 수 있는 것이 이 권한이다.
+- 버전은 1.36 이다. EKS 는 버전마다 표준 지원이 14 개월이고, 끝나면 연장 지원으로 넘어가 시간당 요금이 더 붙는다(1.33 은 2026-07-29 에 끝났다). 1.36 은 2027-08-02 까지 표준이고 집 k3s(v1.36)와 같은 계열이다. `upgrade_policy` 를 `STANDARD` 로 두어 연장 지원 요금이 붙는 상태로 남지 않게 한다.
 
 ### 노드
 
@@ -96,7 +97,7 @@ modules/data/      RDS · ElastiCache · 보안 그룹
 | aws-ebs-csi-driver | PVC 로 EBS 를 만들고 붙인다(IRSA) | 로컬 정적 PV |
 | metrics-server | HPA · `kubectl top` 이 읽는 지표 API | k3s 번들 |
 
-- 버전은 EKS 1.33 의 defaultVersion 으로 고정한다. 적지 않으면 apply 할 때마다 AWS 가 고른 버전이 들어간다.
+- 버전은 EKS 1.36 의 defaultVersion 으로 고정한다. 적지 않으면 apply 할 때마다 AWS 가 고른 버전이 들어간다.
 - coredns · ebs-csi · metrics-server 는 파드로 뜨므로 노드그룹 뒤에 만든다. 먼저 만들면 뜰 노드가 없어 Degraded 로 멈춘다.
 - ebs-csi 는 자기가 만드는 볼륨(Kafka · 관측 WAL)에도 공통 태그를 붙인다(`controller.extraVolumeTags`).
 - gp3 StorageClass 는 여기서 만들지 않는다. 쿠버네티스 오브젝트라 kubernetes provider 를 이 state 에 들여야 하는데, provider 둘이 한 state 에 섞이면 클러스터를 만드는 코드가 그 클러스터에 붙는 자격에 의존하게 된다. cgv-infra 가 배달한다.
@@ -122,7 +123,7 @@ OIDC 공급자를 등록하면 IAM 이 그 서명을 믿는다. 역할의 신뢰
 
 | | 구성 | 집에서는 |
 |---|---|---|
-| RDS MySQL 8.0 | db.m5.large · Multi-AZ(다른 AZ 에 동기 복제 대기) · 20 GiB gp3 암호화 · 퍼블릭 접근 없음 · 백업 없음 | data 네임스페이스의 MySQL 파드 |
+| RDS MySQL 8.4 | db.m5.large · Multi-AZ(다른 AZ 에 동기 복제 대기) · 20 GiB gp3 암호화 · 퍼블릭 접근 없음 · 백업 없음 | data 네임스페이스의 MySQL 파드(9.4) |
 | ElastiCache Redis 7.1 | cache.m5.large 주 1 + 복제본 1 · 자동 전환(다른 AZ) · 클러스터 모드 끔 · 전송 구간 암호화 없음(AUTH 없음) | Sentinel HA 파드 |
 
 - 이중화를 켠다. 이유가 둘 다 다르다.
@@ -145,9 +146,11 @@ provider 의 `default_tags` 가 안 닿는 곳 — 노드 EC2 · 루트 볼륨, 
 | 노드 IMDS | v2 필수 · hop limit 1 | 자동 생성 launch template 의 기본값 |
 | 노드 루트 디스크 | 20 GiB gp3 암호화 | 암호화 설정이 없다 |
 | AMI | `AL2023_x86_64_STANDARD` | 1.30 이후 기본값과 같지만 코드에 안 보인다 |
-| 애드온 버전 | 1.33 의 defaultVersion 으로 고정 | apply 할 때마다 AWS 가 고른 버전이 들어간다 |
+| 애드온 버전 | 1.36 의 defaultVersion 으로 고정 | apply 할 때마다 AWS 가 고른 버전이 들어간다 |
 | 서비스 CIDR | 172.20.0.0/16 | AWS 가 둘 중 하나를 골라 CoreDNS 주소를 띄워 봐야 안다 |
 | RDS 비밀번호 | `manage_master_user_password` | 값이 state 에 평문으로 남는다 |
+| EKS 지원 정책 | `upgrade_policy = STANDARD` | 기본값이 EXTENDED 라 표준 지원이 끝난 버전에서 연장 지원 요금이 붙는다 |
+| RDS 지원 정책 | `engine_lifecycle_support` 끔, 엔진 8.4 | 표준 지원이 끝난 버전(8.0)으로도 만들어지고 연장 지원 요금이 붙는다(대기 인스턴스에도) |
 
 ## 켜고 끄기
 

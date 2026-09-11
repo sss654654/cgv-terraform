@@ -71,6 +71,11 @@ resource "aws_db_instance" "this" {
   engine_version = var.mysql_version
   instance_class = var.rds_instance_class
 
+  # 표준 지원만 쓴다. 기본값(연장 지원 켜짐)이면 표준 지원이 끝난 버전으로도 만들어지고 연장 지원
+  #   요금이 붙는다(Multi-AZ 대기 인스턴스에도). 끄면 그런 버전으로는 생성이 거부되고, 이미 지난
+  #   인스턴스는 다음 메이저로 올라간다 — 하루 켰다 지우는 인스턴스라 올라갈 일이 없다.
+  engine_lifecycle_support = "open-source-rds-extended-support-disabled"
+
   # 담기는 것이 272 KiB 다. 최소 크기로 둔다.
   allocated_storage = 20
   storage_type      = "gp3"

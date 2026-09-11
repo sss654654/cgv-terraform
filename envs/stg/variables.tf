@@ -54,9 +54,13 @@ variable "service_cidr" {
 # ---------- EKS ----------
 
 variable "kubernetes_version" {
-  description = "집 k3s 가 v1.36 계열이다."
+  description = <<-EOT
+    EKS 버전. 표준 지원 중인 것만 쓴다 — 표준 지원이 끝난 버전은 연장 지원 요금이 붙는다
+    (1.33 은 2026-07-29 에 끝났다). 1.36 은 2027-08-02 까지 표준이고 집 k3s(v1.36)와 같은 계열이다.
+    확인: aws eks describe-cluster-versions. 바꾸면 modules/eks 의 애드온 버전도 같이 다시 고른다.
+  EOT
   type        = string
-  default     = "1.33"
+  default     = "1.36"
 }
 
 variable "app_instance_type" {
@@ -82,13 +86,20 @@ variable "obs_instance_type" {
 # ---------- 데이터 ----------
 
 variable "mysql_version" {
-  type    = string
-  default = "8.0"
+  description = <<-EOT
+    RDS MySQL 메이저 버전. 8.4(LTS)는 표준 지원이 2029-07-31 까지다. 8.0 은 2026-07-31 에 끝나
+    연장 지원으로만 만들 수 있고 요금이 붙는다(Multi-AZ 대기에도). 9.x 는 RDS 운영 환경에 없다.
+    집(dev)은 9.4 라 버전이 다르다. booking 의 Flyway 11.7 은 MySQL 8.1 까지 공식 지원이라
+    9.4 에서 "시험 안 된 버전" 경고를 냈다(동작은 했다). 8.4 에서도 같은 경고가 날 수 있다.
+  EOT
+  type        = string
+  default     = "8.4"
 }
 
 variable "rds_parameter_family" {
-  type    = string
-  default = "mysql8.0"
+  description = "mysql_version 과 짝이 맞아야 한다."
+  type        = string
+  default     = "mysql8.4"
 }
 
 variable "rds_instance_class" {

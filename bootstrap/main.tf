@@ -309,6 +309,70 @@ resource "aws_iam_user_policy" "image_updater" {
   })
 }
 
+# ---------- ALB 접근 로그 ----------
+# ALB 가 받은 요청 하나하나를 5분마다 S3 에 쓴다(클라이언트 주소 · 경로 · 상태 · 대상 응답 시간 ·
+#   TLS 프로토콜과 암호군). 파드 로그에는 파드까지 온 요청만 남는다 — ALB 가 자기 선에서 끝낸 것
+#   (초기화 API 차단 403 · 붙을 대상이 없을 때의 5xx · TLS 실패)은 여기에만 남는다.
+#   부하 판에서 k6 가 받은 오류가 ALB 것인지 파드 것인지 가르는 증거가 이 둘의 차이다.
+# 버킷은 클러스터보다 오래 둔다 — 판이 끝난 뒤에 읽는 자료다.
+# 쓰는 주체가 리전의 ELB 서비스 계정이라 IAM 역할이 아니라 버킷 정책으로 연다.
+#   암호화는 SSE-S3 여야 한다. KMS 로 두면 ALB 가 못 쓰고, 로그가 조용히 안 쌓인다.
+resource "aws_s3_bucket" "alb_logs" {
+  bucket = "${var.prefix}-alb-logs-${local.suffix}"
+}
+
+# 리전마다 다른 ELB 서비스 계정. 이 계정에만 쓰기를 연다.
+data "aws_elb_service_account" "current" {}
+
+resource "aws_s3_bucket_policy" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = data.aws_elb_service_account.current.arn }
+      Action    = "s3:PutObject"
+      Resource  = "${aws_s3_bucket.alb_logs.arn}/*"
+    }]
+  })
+}
+
+# 관측 버킷과 같은 20일. 판 사이 비교가 되는 만큼만 둔다.
+resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    id     = "expire-after-20d"
+    status = "Enabled"
+
+    filter {}
+
+    expiration {
+      days = 20
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  bucket = aws_s3_bucket.alb_logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 # ---------- 비용 경보 ----------
 # 켜 둔 시간이 그대로 요금이라, 지우는 것을 잊었을 때 알아차릴 장치를 둔다.
 # 이 예산은 감시만 하고 자원을 건드리지 않는다(예산 작업 · SNS 없이 메일만).
@@ -407,4 +471,9 @@ output "acm_validation_records" {
 
 output "acm_certificate_arn" {
   value = aws_acm_certificate.stg.arn
+}
+
+# cgv-infra 의 Ingress 애노테이션(access-logs-s3-bucket-name)에 적는다.
+output "alb_logs_bucket" {
+  value = aws_s3_bucket.alb_logs.id
 }

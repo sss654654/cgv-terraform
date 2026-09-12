@@ -142,6 +142,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "observability" {
   }
 }
 
+# S3 는 새 버킷을 기본으로 SSE-S3(AES256) 로 암호화한다. 기본값에 맡기지 않고 적는다 —
+#   tfstate 버킷만 적혀 있으면 "관측 버킷은 암호화 안 한다" 로 읽힌다.
+resource "aws_s3_bucket_server_side_encryption_configuration" "observability" {
+  for_each = aws_s3_bucket.observability
+
+  bucket = each.value.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "observability" {
   for_each = aws_s3_bucket.observability
 

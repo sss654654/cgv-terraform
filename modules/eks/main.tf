@@ -113,9 +113,14 @@ resource "aws_iam_role_policy_attachment" "node" {
   policy_arn = each.key
 }
 
-# 노드 두 그룹이 같이 쓰는 인스턴스 설정. 노드그룹 인자로는 못 정하는 것만 둔다.
+# 노드그룹마다 하나씩. 내용은 같고 Name 태그만 다르다 — 노드그룹 자원의 태그는 EC2 로 안 내려가서,
+#   콘솔에서 어느 인스턴스가 어느 그룹인지 보이려면 launch template 이 그룹마다 있어야 한다.
+#   노드그룹 인자로는 못 정하는 것(IMDS · 루트 볼륨 · 인스턴스 태그)만 둔다.
+# ★ 이 자원이 바뀌면 노드그룹이 새로 만들어진다(노드 전부 교체). 켜 둔 채로 apply 하지 않는다.
 resource "aws_launch_template" "node" {
-  name_prefix = "${var.prefix}-node-"
+  for_each = toset(["app", "observability"])
+
+  name_prefix = "${var.prefix}-${each.key}-"
 
   # IMDSv2 만 받는다(토큰 없는 요청 거부). hop limit 1 이면 파드 네트워크에서는 IMDS 에 닿지 않아
   #   파드가 노드 역할의 자격을 꺼내 쓰는 경로가 막힌다. AWS 자격이 필요한 파드는 IRSA 로 받는다.
@@ -145,12 +150,12 @@ resource "aws_launch_template" "node" {
   #   안 붙는다. 하루 비용의 대부분이 노드라 여기서 따로 붙인다.
   tag_specifications {
     resource_type = "instance"
-    tags          = var.tags
+    tags          = merge(var.tags, { Name = "${var.prefix}-${each.key}" })
   }
 
   tag_specifications {
     resource_type = "volume"
-    tags          = var.tags
+    tags          = merge(var.tags, { Name = "${var.prefix}-${each.key}" })
   }
 }
 
@@ -165,8 +170,8 @@ resource "aws_eks_node_group" "app" {
   ami_type = "AL2023_x86_64_STANDARD"
 
   launch_template {
-    id      = aws_launch_template.node.id
-    version = aws_launch_template.node.latest_version
+    id      = aws_launch_template.node["app"].id
+    version = aws_launch_template.node["app"].latest_version
   }
 
   # t 계열을 안 쓴다. 버스터블이라 크레딧이 바닥나면 baseline 으로 떨어지는데,
@@ -197,8 +202,8 @@ resource "aws_eks_node_group" "observability" {
   ami_type        = "AL2023_x86_64_STANDARD"
 
   launch_template {
-    id      = aws_launch_template.node.id
-    version = aws_launch_template.node.latest_version
+    id      = aws_launch_template.node["observability"].id
+    version = aws_launch_template.node["observability"].latest_version
   }
 
   scaling_config {

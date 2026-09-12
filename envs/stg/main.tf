@@ -119,6 +119,10 @@ module "eks" {
   app_node_count    = var.app_node_count
   obs_instance_type = var.obs_instance_type
 
+  # booking 전용 노드. AZ 이름으로 서브넷을 집는다(관측 노드와 같은 이유).
+  booking_subnet_ids_by_az = { for az in var.booking_azs : az => module.network.subnet_ids_by_az[az] }
+  booking_instance_type    = var.booking_instance_type
+
   irsa_service_accounts = local.irsa_service_accounts
   observability_buckets = local.observability_buckets
 

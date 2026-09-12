@@ -44,6 +44,18 @@ variable "app_node_count" {
   type = number
 }
 
+variable "booking_subnet_ids_by_az" {
+  description = <<-EOT
+    booking 전용 노드가 뜰 AZ → 서브넷. AZ 마다 노드그룹 하나 · 노드 하나가 선다.
+    booking 파드 수와 같아야 한다(파드는 노드 분산 required 라 노드보다 많으면 Pending).
+  EOT
+  type        = map(string)
+}
+
+variable "booking_instance_type" {
+  type = string
+}
+
 variable "obs_instance_type" {
   type = string
 }

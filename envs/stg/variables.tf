@@ -108,6 +108,31 @@ variable "obs_instance_type" {
   default     = "m5.xlarge"
 }
 
+variable "booking_azs" {
+  description = <<-EOT
+    booking 전용 노드가 서는 AZ. AZ 마다 노드그룹 하나 · 노드 하나 · booking 파드 하나.
+    booking 파드 수(envs/stg/booking.yaml replicaCount)와 같아야 한다.
+
+    2026-09-13 1만 명 판: booking 이 앱 노드를 다른 파드와 나눠 쓰면 오픈 순간 새 JVM 의 컴파일(코어 2.4개)이
+    노드를 채워 같은 노드의 Kafka 브로커가 밀렸다(발행 p99 3.6초 · 전파 SLO 78–90%). 혼자 쓰는 노드에서
+    데워진 판은 100% 였다. 그래서 이 파드만 전용 노드에 둔다(modules/eks 의 booking 노드그룹 주석).
+    둘 다 2c 였던 것을 2a · 2c 로 나눠 한 AZ 가 죽어도 한 대가 남게 한다.
+  EOT
+  type        = list(string)
+  default     = ["ap-northeast-2a", "ap-northeast-2c"]
+
+  validation {
+    condition     = alltrue([for az in var.booking_azs : can(regex("^ap-northeast-2[a-d]$", az))])
+    error_message = "ap-northeast-2a 에서 2d 사이여야 한다."
+  }
+}
+
+variable "booking_instance_type" {
+  description = "booking 노드 하나. 오픈 순간 실측 최고 3.4코어(컴파일 2.4 + 처리 1.0), 데워지면 0.8–1.1코어. 4 vCPU 를 혼자 쓴다."
+  type        = string
+  default     = "m5.xlarge"
+}
+
 # ---------- 데이터 ----------
 
 variable "mysql_version" {

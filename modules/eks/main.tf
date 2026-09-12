@@ -118,7 +118,7 @@ resource "aws_iam_role_policy_attachment" "node" {
 #   노드그룹 인자로는 못 정하는 것(IMDS · 루트 볼륨 · 인스턴스 태그)만 둔다.
 # ★ 이 자원이 바뀌면 노드그룹이 새로 만들어진다(노드 전부 교체). 켜 둔 채로 apply 하지 않는다.
 resource "aws_launch_template" "node" {
-  for_each = toset(["app", "observability"])
+  for_each = toset(["app", "booking", "observability"])
 
   name_prefix = "${var.prefix}-${each.key}-"
 
@@ -190,6 +190,60 @@ resource "aws_eks_node_group" "app" {
     max_unavailable = 1
   }
 
+  # 역할 라벨. queue · frontend · Kafka 브로커 · 오퍼레이터가 여기에 선다(queue 는 nodeSelector 로 고정).
+  #   taint 는 없다 — 여기 오면 안 되는 파드가 없다. 라벨 변경은 노드 교체 없이 반영된다.
+  labels = {
+    "workload" = "app"
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.node]
+}
+
+# booking 전용 노드. AZ 마다 하나씩, 노드그룹도 AZ 마다 하나(관측 노드와 같은 고정 방식).
+#
+# 2026-09-13 stg 1만 명 판에서 booking 파드가 앱 노드를 다른 파드와 나눠 쓰는 것이 오픈 순간의
+#   지연 원인이었다. 새로 뜬 booking(JVM)은 오픈 순간 컴파일에 코어 2.4개를 쓰고 처리에 1개를 더 써
+#   4 vCPU 노드를 채웠고(런큐 대기 15 스레드초/초 · CPU 압박 66%), 같은 노드의 Kafka 브로커가 밀려
+#   발행 p99 3.6초 · 다른 노드의 queue 까지 줄서기 2.5초가 됐다. 파드 둘이 한 노드에 앉은 판(06:42 ·
+#   07:08)은 전파 SLO 가 78–90%, 한 노드에 하나만 있고 데워진 판(05:33)은 100% 였다.
+#   버스트하는 파드는 이것 하나다(queue 는 Go 라 컴파일 폭풍이 없고 0.2코어). 그래서 이 파드만
+#   노드를 혼자 쓰게 하고, Kafka 브로커는 앱 노드에 남긴다(브로커 실사용 0.15코어에 전용 노드 셋은 과하다).
+# taint 로 다른 파드를 막는다 — nodeSelector 만으로는 브로커 · 오퍼레이터가 재시작 때 여기로 옮겨 앉을 수 있다.
+#   booking 파드와 DaemonSet(vpc-cni · kube-proxy · ebs-csi · node-exporter · alloy)만 toleration 으로 들어온다.
+# AZ 둘(2a · 2c)로 나눈 이유: 앱 노드그룹의 queue anti-affinity 아래에서는 booking 이 2c 두 노드에만
+#   앉을 수 있어 단일 AZ 였다. 노드그룹을 AZ 별로 두면 한 AZ 가 죽어도 한 대가 남는다.
+# 노드를 혼자 쓰므로 booking 의 CPU limit(4000m = 노드 전부)이 정당하다 — 그 값의 전제가 이 노드그룹이다.
+resource "aws_eks_node_group" "booking" {
+  for_each = var.booking_subnet_ids_by_az
+
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = "booking-${trimprefix(each.key, "ap-northeast-")}"
+  node_role_arn   = aws_iam_role.node.arn
+  subnet_ids      = [each.value]
+  instance_types  = [var.booking_instance_type]
+  ami_type        = "AL2023_x86_64_STANDARD"
+
+  launch_template {
+    id      = aws_launch_template.node["booking"].id
+    version = aws_launch_template.node["booking"].latest_version
+  }
+
+  scaling_config {
+    desired_size = 1
+    min_size     = 1
+    max_size     = 1
+  }
+
+  taint {
+    key    = "workload"
+    value  = "booking"
+    effect = "NO_SCHEDULE"
+  }
+
+  labels = {
+    "workload" = "booking"
+  }
+
   depends_on = [aws_iam_role_policy_attachment.node]
 }
 
@@ -213,7 +267,7 @@ resource "aws_eks_node_group" "observability" {
   subnet_ids = [var.obs_subnet_id]
 
   instance_types = [var.obs_instance_type]
-  ami_type        = "AL2023_x86_64_STANDARD"
+  ami_type       = "AL2023_x86_64_STANDARD"
 
   launch_template {
     id      = aws_launch_template.node["observability"].id

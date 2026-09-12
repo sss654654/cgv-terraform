@@ -10,6 +10,8 @@ output "handoff" {
 
     # AWS 가 만든 마스터 비밀번호가 든 시크릿. 이 ARN 으로 값을 읽어 booking-secrets 를 만든다.
     mysql_secret_arn = module.data.mysql_secret_arn
+    # Redis 비밀번호가 든 시크릿. queue-secrets · booking-secrets 양쪽에 같은 값이 들어간다.
+    redis_secret_arn = module.data.redis_secret_arn
   }
 }
 

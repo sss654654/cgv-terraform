@@ -19,6 +19,17 @@ output "data_security_group_id" {
   value = aws_security_group.data.id
 }
 
+output "redis_secret_arn" {
+  description = <<-EOT
+    Redis 비밀번호가 담긴 Secrets Manager 시크릿. MySQL 과 달리 AWS 가 아니라 Terraform 이 만든다
+    — ElastiCache 에는 비밀번호를 대신 관리해 주는 기능이 없다.
+    켜는 날 이 ARN 으로 값을 읽어 app 네임스페이스의 queue-secrets · booking-secrets 에 넣는다.
+      aws secretsmanager get-secret-value --secret-id <이 값> --query SecretString --output text
+    돌아오는 것은 JSON 이 아니라 비밀번호 문자열 그대로다.
+  EOT
+  value       = aws_secretsmanager_secret.redis_auth.arn
+}
+
 output "mysql_secret_arn" {
   description = <<-EOT
     AWS 가 만든 마스터 비밀번호가 담긴 Secrets Manager 시크릿.

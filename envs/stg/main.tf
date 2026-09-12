@@ -21,6 +21,12 @@ terraform {
       source  = "hashicorp/http"
       version = "~> 3.0"
     }
+    # Redis 비밀번호를 만든다. ElastiCache 에는 RDS 의 manage_master_user_password 에 해당하는
+    #   기능이 없어 값을 이쪽에서 만들어 넣는다.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {

@@ -31,9 +31,8 @@ resource "aws_vpc_security_group_ingress_rule" "mysql" {
   to_port                      = 3306
 }
 
-# ElastiCache 는 전송 구간 암호화를 켜야 비밀번호를 쓸 수 있다. Redis 프로토콜이 평문이라
-# 암호화 없이 보내면 비밀번호가 그대로 흐르기 때문이다.
-# 암호화를 끄기로 해서 비밀번호도 안 쓴다 — 격리는 이 규칙 하나가 맡는다.
+# Redis 는 이 규칙과 비밀번호 두 겹으로 막는다. 이 규칙만 있으면 노드 위의 어떤 파드든
+# 6379 에 닿는 순간 대기열 전체를 읽고 쓴다 — 파드 하나가 뚫리면 그게 곧 전권이다.
 resource "aws_vpc_security_group_ingress_rule" "redis" {
   security_group_id = aws_security_group.data.id
   description       = "Redis from EKS nodes"
@@ -133,6 +132,30 @@ resource "aws_elasticache_parameter_group" "this" {
   }
 }
 
+# Redis 비밀번호. RDS 는 AWS 가 만들어 Secrets Manager 에 넣어 주지만(manage_master_user_password)
+#   ElastiCache 에는 그 기능이 없어 여기서 만들고 같은 자리에 넣는다 — 켜는 날 두 비밀번호를
+#   같은 방법으로 꺼내게 된다(bootstrap/eks/secrets.sh).
+# 값은 state 에 남는다. state 버킷은 암호화 · 버전 관리 · 공개 차단이 걸려 있다.
+# ElastiCache 가 받는 형식: 16-128자, `/` `"` `@` 와 공백은 못 쓴다.
+resource "random_password" "redis_auth" {
+  length           = 48
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "aws_secretsmanager_secret" "redis_auth" {
+  name = "${var.prefix}-redis-auth"
+
+  # 기본값은 30일 유예다. 이 환경은 하루 만들고 지우므로, 유예가 있으면 다음 판에서 같은 이름을
+  #   만들 때 "삭제 예정" 과 부딪혀 apply 가 멈춘다. 0 이면 destroy 와 함께 즉시 사라진다.
+  recovery_window_in_days = 0
+}
+
+resource "aws_secretsmanager_secret_version" "redis_auth" {
+  secret_id     = aws_secretsmanager_secret.redis_auth.id
+  secret_string = random_password.redis_auth.result
+}
+
 resource "aws_elasticache_replication_group" "this" {
   replication_group_id = var.prefix
   description          = "${var.prefix} queue and seat locks"
@@ -162,10 +185,20 @@ resource "aws_elasticache_replication_group" "this" {
   # CloudWatch exporter(YACE)가 자원을 태그 API 로 찾는다. 태그가 하나도 없는 자원은 거기 안 나온다.
   tags = { Name = var.prefix }
 
-  # TLS 를 켜면 Redis CPU 를 10-30% 더 쓴다. 1코어가 이 설계의 절대 상한이라
-  # 병목을 지목하는 판에 변수가 하나 느는 셈이다. t 계열을 피하는 것과 같은 이유다.
-  # prd 라면 켠다. 켜면 인증이 딸려 온다.
-  transit_encryption_enabled = false
+  # 전송 구간 암호화와 비밀번호는 한 묶음이다 — ElastiCache 는 암호화를 켜야 비밀번호를 받는다.
+  #   Redis 프로토콜이 평문이라, 암호화 없이 보내면 비밀번호가 그대로 흐르기 때문이다.
+  # 켜는 이유는 인증이다. 이것이 없으면 Redis 는 "6379 에 닿을 수 있으면 전권" 이 된다 —
+  #   대기열 · 좌석 락 · 입장 인증이 전부 그 안에 있어, 파드 하나가 뚫리면 남의 자리를 지우거나
+  #   좌석 락을 풀 수 있다. 보안 그룹은 "어디서 오는가" 만 보고 "누구인가" 는 안 본다.
+  # 암호화 자체도 값을 한다. 노드와 ElastiCache 사이는 VPC 안이지만 관리형 서비스 구간이라
+  #   인스턴스 간 자동 암호화의 보장 밖이다.
+  # 대가로 Redis CPU 를 더 쓴다. 이 설계의 상한이 1코어라 부하 판의 한계값이 같이 움직인다 —
+  #   실제 서비스 조건에서 잰 값이 진짜 상한이므로 켠 채로 재고, dev(평문)와 갈린 것을 기록한다.
+  transit_encryption_enabled = true
+  auth_token                 = random_password.redis_auth.result
+  # 토큰을 바꿀 때 두 값을 함께 받는 단계를 거치지 않고 한 번에 교체한다. 판마다 새로 만드는
+  #   환경이라 무중단 교체가 필요 없다. prd 는 ROTATE 로 두 값을 겹치게 두고 앱을 배포한 뒤 좁힌다.
+  auth_token_update_strategy = "SET"
   at_rest_encryption_enabled = true
 
   # 하루 켰다 지운다.

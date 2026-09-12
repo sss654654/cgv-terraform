@@ -132,6 +132,10 @@ module "data" {
   # EKS 가 만든 클러스터 보안 그룹에서 오는 것만 열어 준다.
   node_security_group_id = module.eks.cluster_security_group_id
 
+  # 떠 있는 복제 그룹에 암호화를 켜는 동안에만 preferred 로 넘긴다(-var 로).
+  #   평문 연결이 살아 있어 옛 파드가 계속 붙고, 앱이 전부 TLS 로 바뀐 뒤 required 로 되돌린다.
+  redis_transit_encryption_mode = var.redis_transit_encryption_mode
+
   mysql_version        = var.mysql_version
   rds_instance_class   = var.rds_instance_class
   rds_parameter_family = var.rds_parameter_family

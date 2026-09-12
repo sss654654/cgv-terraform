@@ -195,7 +195,13 @@ resource "aws_elasticache_replication_group" "this" {
   # 대가로 Redis CPU 를 더 쓴다. 이 설계의 상한이 1코어라 부하 판의 한계값이 같이 움직인다 —
   #   실제 서비스 조건에서 잰 값이 진짜 상한이므로 켠 채로 재고, dev(평문)와 갈린 것을 기록한다.
   transit_encryption_enabled = true
-  auth_token                 = random_password.redis_auth.result
+  # 이미 떠 있는 복제 그룹의 암호화를 켤 때는 한 번에 못 바꾼다. AWS 가 두 단계를 요구한다.
+  #   preferred  암호화 연결과 평문 연결을 둘 다 받는다. 앱을 TLS 로 바꾸는 동안 옛 파드가 계속 붙는다
+  #   required   평문을 끊는다. 앱이 전부 TLS 로 붙은 뒤에 옮긴다
+  # 빈 클러스터를 새로 만들 때는 required 로 바로 만들 수 있다 — 다음 판부터는 이 값이 required 다.
+  # ★ preferred 인 동안은 평문 연결이 살아 있으므로 보안 그룹이 유일한 방어다. 오래 두지 않는다.
+  transit_encryption_mode = var.redis_transit_encryption_mode
+  auth_token              = random_password.redis_auth.result
   # 토큰을 바꿀 때 두 값을 함께 받는 단계를 거치지 않고 한 번에 교체한다. 판마다 새로 만드는
   #   환경이라 무중단 교체가 필요 없다. prd 는 ROTATE 로 두 값을 겹치게 두고 앱을 배포한 뒤 좁힌다.
   auth_token_update_strategy = "SET"

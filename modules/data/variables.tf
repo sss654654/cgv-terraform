@@ -28,6 +28,23 @@ variable "redis_replicas" {
   type        = number
 }
 
+variable "redis_transit_encryption_mode" {
+  description = <<-EOT
+    ElastiCache 전송 구간 암호화 모드.
+      preferred  암호화 연결과 평문 연결을 둘 다 받는다. 이미 떠 있는 그룹에 암호화를 켜는 도중에만 쓴다
+      required   평문을 끊는다. 정상 상태
+    AWS 는 떠 있는 그룹을 required 로 한 번에 못 바꾸게 한다 — preferred 를 거쳐야 한다.
+    빈 클러스터를 새로 만들 때는 required 로 바로 만들어진다.
+  EOT
+  type        = string
+  default     = "required"
+
+  validation {
+    condition     = contains(["preferred", "required"], var.redis_transit_encryption_mode)
+    error_message = "preferred 또는 required 여야 한다."
+  }
+}
+
 variable "node_security_group_id" {
   description = "EKS 가 만든 클러스터 보안 그룹. 여기서 오는 것만 3306·6379 를 통과시킨다."
   type        = string

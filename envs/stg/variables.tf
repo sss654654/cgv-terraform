@@ -187,3 +187,11 @@ variable "loadgen_key_name" {
   type        = string
   default     = ""
 }
+
+# 전송 구간 암호화를 켜는 전환 중에만 preferred 로 넘긴다.
+#   terraform apply -var redis_transit_encryption_mode=preferred
+# 앱이 전부 TLS 로 붙은 것을 확인한 뒤 값을 빼고 다시 apply 하면 required 로 돌아간다.
+variable "redis_transit_encryption_mode" {
+  type    = string
+  default = "required"
+}

@@ -97,7 +97,10 @@ resource "aws_route_table_association" "public" {
 # 한 보안 그룹을 같이 쓰면 서비스를 여는 순간 Grafana 도 같이 열린다.
 # cgv-infra 의 두 Ingress 가 이 이름(Name 태그)으로 가리킨다 — ALB Controller 의 security-groups
 #   애노테이션은 ID 와 Name 태그를 둘 다 받는다. 이름이 정해져 있어 켜는 날 옮길 값이 없다.
-# 도메인도 인증서도 안 쓰기로 해서 둘 다 80 뿐이다.
+# 서비스 ALB 는 80 과 443 을 연다 — 80 은 443 으로 보내는 리다이렉트만 받는다.
+#   리스너를 여는 것(cgv-infra 의 Ingress 애노테이션)과 문을 여는 것(이 규칙)은 따로다.
+#   리스너만 만들면 ALB 는 443 을 듣고 있는데 보안 그룹이 막아 연결이 시간 초과로 끝난다.
+# Grafana ALB 는 80 뿐이다 — 집 공인 IP 에서만 열리고 인증서를 쓰지 않는다.
 
 resource "aws_security_group" "alb_public" {
   name        = "${var.prefix}-alb-public"
@@ -111,12 +114,24 @@ resource "aws_security_group" "alb_public" {
 #   트래픽이 IGW 로 나갔다 들어오고, ALB 가 보는 출발지가 부하 발생기의 공인 IP 가 된다.
 resource "aws_vpc_security_group_ingress_rule" "alb_public_http" {
   security_group_id = aws_security_group.alb_public.id
-  description       = "internet"
+  description       = "internet - redirect to 443"
 
   cidr_ipv4   = "0.0.0.0/0"
   ip_protocol = "tcp"
   from_port   = 80
   to_port     = 80
+}
+
+# 서비스가 실제로 지나는 문. 80 을 닫지 않는 이유는 주소를 http 로 친 사람을 https 로 보내기
+#   위해서다 — 닫으면 그 사람은 리다이렉트를 못 받고 연결 실패만 본다.
+resource "aws_vpc_security_group_ingress_rule" "alb_public_https" {
+  security_group_id = aws_security_group.alb_public.id
+  description       = "internet"
+
+  cidr_ipv4   = "0.0.0.0/0"
+  ip_protocol = "tcp"
+  from_port   = 443
+  to_port     = 443
 }
 
 resource "aws_security_group" "alb_admin" {

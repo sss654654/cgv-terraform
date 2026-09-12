@@ -118,7 +118,11 @@ resource "aws_iam_role_policy_attachment" "node" {
 #   노드그룹 인자로는 못 정하는 것(IMDS · 루트 볼륨 · 인스턴스 태그)만 둔다.
 # ★ 이 자원이 바뀌면 노드그룹이 새로 만들어진다(노드 전부 교체). 켜 둔 채로 apply 하지 않는다.
 resource "aws_launch_template" "node" {
-  for_each = toset(["app", "booking", "observability"])
+  # booking 은 AZ 마다 노드그룹이 하나라 LT 도 AZ 마다 하나다.
+  #   처음에 booking 셋이 LT 하나를 나눠 쓰게 했더니 먼저 만든 노드그룹만 ACTIVE 가 되고 나머지는
+  #   CREATING 인 채 ASG 를 못 만들었다(2026-09-13, 2a · 2b 각각 20분 넘게). CloudTrail 에는 EKS 가
+  #   DescribeLaunchTemplateVersions 만 반복했다. 노드그룹마다 LT 를 따로 주는 것이 app · observability 와도 같다.
+  for_each = toset(concat(["app", "observability"], [for az in keys(var.booking_subnet_ids_by_az) : "booking-${trimprefix(az, "ap-northeast-")}"]))
 
   name_prefix = "${var.prefix}-${each.key}-"
 
@@ -224,8 +228,8 @@ resource "aws_eks_node_group" "booking" {
   ami_type        = "AL2023_x86_64_STANDARD"
 
   launch_template {
-    id      = aws_launch_template.node["booking"].id
-    version = aws_launch_template.node["booking"].latest_version
+    id      = aws_launch_template.node["booking-${trimprefix(each.key, "ap-northeast-")}"].id
+    version = aws_launch_template.node["booking-${trimprefix(each.key, "ap-northeast-")}"].latest_version
   }
 
   scaling_config {

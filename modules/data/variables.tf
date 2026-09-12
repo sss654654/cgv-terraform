@@ -45,6 +45,23 @@ variable "redis_transit_encryption_mode" {
   }
 }
 
+variable "redis_auth_token_update_strategy" {
+  description = <<-EOT
+    ElastiCache AUTH 토큰을 바꾸는 방식.
+      ROTATE  토큰을 더한다. 토큰을 보내는 연결과 안 보내는 연결이 둘 다 통한다 —
+              떠 있는 그룹에 토큰을 처음 붙이거나, 앱을 끊지 않고 토큰을 바꿀 때
+      SET     그 토큰만 받는다. 정상 상태
+    바꿀 옛 토큰이 없는 그룹에 SET 을 쓰면 거부된다("There is no AUTH token to SET").
+  EOT
+  type        = string
+  default     = "SET"
+
+  validation {
+    condition     = contains(["ROTATE", "SET"], var.redis_auth_token_update_strategy)
+    error_message = "ROTATE 또는 SET 이어야 한다."
+  }
+}
+
 variable "node_security_group_id" {
   description = "EKS 가 만든 클러스터 보안 그룹. 여기서 오는 것만 3306·6379 를 통과시킨다."
   type        = string

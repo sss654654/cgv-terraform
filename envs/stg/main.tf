@@ -136,6 +136,10 @@ module "data" {
   #   평문 연결이 살아 있어 옛 파드가 계속 붙고, 앱이 전부 TLS 로 바뀐 뒤 required 로 되돌린다.
   redis_transit_encryption_mode = var.redis_transit_encryption_mode
 
+  # 떠 있는 그룹에 토큰을 처음 붙일 때만 ROTATE 로 넘긴다(-var).
+  #   토큰 없는 연결이 살아 있어 앱을 끊지 않고, 앱이 토큰을 들고 붙은 뒤 SET 으로 좁힌다.
+  redis_auth_token_update_strategy = var.redis_auth_token_update_strategy
+
   mysql_version        = var.mysql_version
   rds_instance_class   = var.rds_instance_class
   rds_parameter_family = var.rds_parameter_family

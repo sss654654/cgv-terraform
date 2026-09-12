@@ -195,3 +195,11 @@ variable "redis_transit_encryption_mode" {
   type    = string
   default = "required"
 }
+
+# 떠 있는 그룹에 AUTH 토큰을 처음 붙이는 전환 중에만 ROTATE 로 넘긴다.
+#   terraform apply -var redis_auth_token_update_strategy=ROTATE
+# 앱이 토큰을 들고 붙은 것을 확인한 뒤 값을 빼고 다시 apply 하면 SET 으로 좁혀진다.
+variable "redis_auth_token_update_strategy" {
+  type    = string
+  default = "SET"
+}

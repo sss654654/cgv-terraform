@@ -32,6 +32,31 @@ variable "azs" {
   default     = ["ap-northeast-2a", "ap-northeast-2c", "ap-northeast-2b"]
 }
 
+variable "obs_az" {
+  description = <<-EOT
+    관측 노드가 뜰 AZ 하나. 위 목록 안의 값이어야 한다.
+
+    관측 노드는 1대이고 그 위의 Mimir · Loki · Tempo 가 EBS 볼륨을 들고 있다. EBS 는 AZ 에 묶이므로
+    노드그룹에 서브넷을 여럿 주면 노드를 다시 만들 때 AWS 가 아무 AZ 나 고르고, 볼륨과 어긋나면
+    파드가 영영 Pending 이 된다. 2026-09-12 노드그룹 교체에서 관측 노드가 2c 에서 2b 로 옮겨 떠
+    Mimir ingester 가 멈췄다 — ingester 가 없으면 새 지표가 하나도 저장되지 않는다.
+
+    앱 노드그룹은 반대로 AZ 를 흩는다. 무상태라 한 AZ 가 죽어도 남은 AZ 가 받는다.
+    Kafka 도 흩는다 — 브로커가 셋이라 AZ 마다 하나씩 서고, 볼륨도 그 AZ 에 각각 생긴다.
+    상태를 든 것이 하나뿐인 노드그룹만 고정한다.
+
+    ★ 이미 볼륨이 있는 환경에서 이 값을 바꾸면 그 볼륨을 못 쓴다. 지금 값은 볼륨이 있는 AZ 다.
+    대가: 이 AZ 가 죽으면 관측이 끊긴다. 서비스는 계속 돌지만 그동안을 못 본다.
+  EOT
+  type        = string
+  default     = "ap-northeast-2c"
+
+  validation {
+    condition     = can(regex("^ap-northeast-2[a-d]$", var.obs_az))
+    error_message = "ap-northeast-2a 에서 2d 사이여야 한다."
+  }
+}
+
 variable "vpc_cidr" {
   description = <<-EOT
     집과 안 겹치게. 집은 192.168.0.0/24(LAN)과 10.0.0.0/24(vmbr1)를 쓴다.

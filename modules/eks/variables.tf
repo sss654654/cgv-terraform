@@ -9,8 +9,18 @@ variable "kubernetes_version" {
 }
 
 variable "subnet_ids" {
-  description = "서로 다른 AZ 의 서브넷(EKS 는 최소 둘을 요구한다). 노드그룹이 이 서브넷들에 노드를 AZ 별로 고르게 띄운다."
+  description = "서로 다른 AZ 의 서브넷(EKS 는 최소 둘을 요구한다). 앱 노드그룹이 이 서브넷들에 노드를 AZ 별로 고르게 띄운다."
   type        = list(string)
+}
+
+variable "obs_subnet_id" {
+  description = <<-EOT
+    관측 노드그룹이 뜰 서브넷 하나. AZ 를 고정하는 값이다.
+    이 노드의 Mimir · Loki · Tempo 가 EBS 볼륨을 들고 있고 EBS 는 AZ 에 묶이므로,
+    서브넷을 여럿 주면 노드를 다시 만들 때 볼륨과 AZ 가 어긋나 파드가 Pending 이 된다.
+    ★ 이미 볼륨이 있는 환경에서 이 값을 바꾸면 그 볼륨을 못 쓴다. 바꿀 때는 볼륨을 같이 버린다.
+  EOT
+  type        = string
 }
 
 variable "home_cidr" {

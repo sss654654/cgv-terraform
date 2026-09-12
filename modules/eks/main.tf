@@ -197,8 +197,22 @@ resource "aws_eks_node_group" "observability" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = "observability"
   node_role_arn   = aws_iam_role.node.arn
-  subnet_ids      = var.subnet_ids
-  instance_types  = [var.obs_instance_type]
+
+  # ★ AZ 하나에 고정한다. 앱 노드그룹과 갈리는 유일한 자리다.
+  #
+  # 이 노드에 뜨는 Mimir · Loki · Tempo 가 EBS 볼륨을 들고 있는데, EBS 는 AZ 에 묶인다.
+  #   서브넷 셋을 주면 노드를 다시 만들 때 AWS 가 그중 아무 데나 고르고, 볼륨이 있는 AZ 와
+  #   어긋나면 파드가 영영 Pending 이 된다(PersistentVolume's node affinity).
+  #   2026-09-12 노드그룹 교체에서 관측 노드가 2c 에서 2b 로 옮겨 떠 Mimir ingester 가 멈췄고,
+  #   ingester 가 없으면 새 지표가 하나도 저장되지 않는다.
+  # 노드가 1대라 AZ 를 흩는 뜻이 애초에 없다 — 서브넷 셋을 준 것은 앱 노드그룹 값을 그대로
+  #   넘긴 것이었고, 그것이 원인이었다.
+  # 앱 노드그룹은 반대다. 무상태라 AZ 를 흩어야 한 AZ 가 죽어도 받는다.
+  # 대가: 이 AZ 가 죽으면 관측이 끊긴다. 서비스는 계속 돌지만 그동안을 못 본다.
+  #   prd 는 관측을 별도 계정 · 별도 리전에 두거나, 이 노드그룹을 AZ 마다 하나씩 세 대로 둔다.
+  subnet_ids = [var.obs_subnet_id]
+
+  instance_types = [var.obs_instance_type]
   ami_type        = "AL2023_x86_64_STANDARD"
 
   launch_template {

@@ -109,8 +109,11 @@ module "eks" {
   prefix             = var.prefix
   kubernetes_version = var.kubernetes_version
   subnet_ids         = module.network.subnet_ids
-  home_cidr          = local.home_cidr
-  service_cidr       = var.service_cidr
+  # 관측 노드는 AZ 하나에 고정한다 — 그 노드의 볼륨(Mimir · Loki · Tempo)이 AZ 에 묶이기 때문이다.
+  #   목록 순서로 고르지 않고 AZ 이름으로 집는다. 순서로 고르면 AZ 목록이 바뀔 때 다른 AZ 를 집는다.
+  obs_subnet_id = module.network.subnet_ids_by_az[var.obs_az]
+  home_cidr     = local.home_cidr
+  service_cidr  = var.service_cidr
 
   app_instance_type = var.app_instance_type
   app_node_count    = var.app_node_count

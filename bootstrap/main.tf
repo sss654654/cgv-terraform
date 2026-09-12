@@ -54,6 +54,13 @@ variable "monthly_budget_usd" {
   description = "월 한도(USD)"
 }
 
+# 서비스 호스트 이름. 인증서와 Ingress host 가 이 값이다. 도메인이 개인 소유라 저장소에 두지 않는다.
+#   Grafana 는 이 이름을 안 쓴다 — ALB 기본 DNS 이름 · 80 으로 두고 보안 그룹(집 IP)으로 막는다.
+variable "stg_hostname" {
+  type        = string
+  description = "stg 서비스 호스트 이름(예: ticket-stg.example.com)"
+}
+
 data "aws_caller_identity" "current" {}
 
 locals {
@@ -345,6 +352,25 @@ resource "aws_budgets_budget" "monthly" {
   }
 }
 
+# ---------- 인증서 ----------
+# 도메인은 Cloudflare 에 있고 stg 는 그 아래 이름 하나만 쓴다. 인증서는 클러스터보다 오래 산다 —
+#   envs/stg 에 두면 판마다 새로 발급받고 검증 레코드를 다시 넣어야 한다.
+# DNS 검증. 아래 출력의 CNAME 을 Cloudflare 에 한 번 넣으면 발급되고, 그 레코드가 남아 있는 동안
+#   ACM 이 만료 전에 스스로 갱신한다. 레코드를 지우면 갱신이 멈춘다.
+# aws_acm_certificate_validation 은 두지 않는다 — 그 자원은 발급될 때까지 apply 를 붙들고,
+#   여기서는 발급을 기다려야 하는 다음 자원이 Terraform 안에 없다(443 리스너는 ALB 컨트롤러가 만든다).
+#   컨트롤러는 Ingress 의 host 와 같은 이름의 발급된 인증서를 ACM 에서 찾아 붙이므로 ARN 을 어디에도 안 적는다.
+#   발급 여부는 `aws acm describe-certificate --certificate-arn <arn> --query Certificate.Status` 로 본다.
+resource "aws_acm_certificate" "stg" {
+  domain_name       = var.stg_hostname
+  validation_method = "DNS"
+
+  # 이름을 바꾸면 새 인증서를 먼저 만들고 옛것을 지운다. ALB 가 옛 ARN 을 잡고 있는 동안 지우면 실패한다.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 # ---------- 출력 ----------
 # stg/main.tf 의 backend, 관측 차트 values, GitLab CI 의 push 대상에 이 값을 적는다.
 
@@ -366,4 +392,19 @@ output "ecr_users" {
     push = aws_iam_user.ci_push.name
     poll = aws_iam_user.image_updater.name
   }
+}
+
+# Cloudflare 에 넣을 검증 레코드. 이름 · 값 끝의 점은 빼도 된다. 프록시는 끄고(DNS only) 넣는다.
+output "acm_validation_records" {
+  value = [
+    for o in aws_acm_certificate.stg.domain_validation_options : {
+      name  = o.resource_record_name
+      type  = o.resource_record_type
+      value = o.resource_record_value
+    }
+  ]
+}
+
+output "acm_certificate_arn" {
+  value = aws_acm_certificate.stg.arn
 }

@@ -116,13 +116,12 @@ variable "booking_azs" {
     2026-09-13 1만 명 판: booking 이 앱 노드를 다른 파드와 나눠 쓰면 오픈 순간 새 JVM 의 컴파일(코어 2.4개)이
     노드를 채워 같은 노드의 Kafka 브로커가 밀렸다(발행 p99 3.6초 · 전파 SLO 78–90%). 혼자 쓰는 노드에서
     데워진 판은 100% 였다. 그래서 이 파드만 전용 노드에 둔다(modules/eks 의 booking 노드그룹 주석).
-    둘 다 2c 였던 것을 두 AZ 로 나눠 한 AZ 가 죽어도 한 대가 남게 한다.
-    2b · 2c 인 이유: 처음 2a · 2c 로 apply 하다가 booking-2a 노드그룹이 AWS 쪽에서 CREATING 인 채
-    ASG 도 인스턴스도 없이 멈췄다(2026-09-13 07:39, apply 프로세스도 그 사이 죽음). 어느 AZ 든
-    둘만 다르면 되므로 2b 로 바꿔 새로 만들었다. 멈춘 booking-2a 는 state 에 없고 삭제 요청을 걸었다.
+    둘 다 2c 였던 것을 2a · 2c 로 나눠 한 AZ 가 죽어도 한 대가 남게 한다.
+    2026-09-13 첫 apply 에서 booking 셋이 launch template 하나를 나눠 쓰게 돼 있어 2a 가 CREATING 인 채
+    멈췄다(modules/eks 의 LT 주석). 노드그룹마다 LT 를 따로 두고 2a 를 다시 만들었다.
   EOT
   type        = list(string)
-  default     = ["ap-northeast-2b", "ap-northeast-2c"]
+  default     = ["ap-northeast-2a", "ap-northeast-2c"]
 
   validation {
     condition     = alltrue([for az in var.booking_azs : can(regex("^ap-northeast-2[a-d]$", az))])

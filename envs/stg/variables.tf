@@ -90,16 +90,21 @@ variable "kubernetes_version" {
 
 variable "app_instance_type" {
   description = <<-EOT
-    앱 노드. 5만 기준 request 합이 5,400m / 6,416Mi 라 m5.xlarge(4 vCPU · 16 GiB) 넷이면 37% 다.
-    t 계열은 안 쓴다 — 크레딧이 바닥나면 느려지는데 그것이 서비스 한계인지 가릴 수 없다.
+    앱 노드. t 계열은 안 쓴다 — 크레딧이 바닥나면 느려지는데 그것이 서비스 한계인지 가릴 수 없다.
   EOT
   type        = string
   default     = "m5.xlarge"
 }
 
 variable "app_node_count" {
-  type    = number
-  default = 4
+  description = <<-EOT
+    booking 이 전용 노드그룹으로 빠진 뒤 이 노드에 남는 것은 queue 넷 · Kafka 브로커 셋 · frontend 둘이다.
+    브로커는 requests = limits = 1 코어(Guaranteed)라, 셋이 노드를 하나씩 쓰려면 노드도 셋이어야 한다.
+    셋이면 app 노드가 ap-northeast-2a · 2b · 2c 에 하나씩 놓인다.
+    request 합 7,015m / 11,760m = 60%(노드마다 DaemonSet 340m 포함).
+  EOT
+  type        = number
+  default     = 3
 }
 
 variable "obs_instance_type" {

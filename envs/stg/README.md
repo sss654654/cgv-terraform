@@ -21,6 +21,7 @@
 | `variables.tf` | 값마다 근거를 `description` 에 적는다 |
 | `outputs.tf` | `handoff` — cgv-infra 에 옮길 값 · `expected` — 이미 적힌 값과 대조 |
 | `loadgen.tf` | VPC 안 발생기 한 대 (기록된 판에는 안 씀 — [부하 발생기](#부하-발생기)) |
+| `destroy.md` | 지우는 순서 · 명령 · 잔존 확인 |
 
 잠금은 S3 조건부 쓰기(`use_lockfile`, Terraform 1.10+)라 DynamoDB 테이블이 없다.
 
@@ -79,14 +80,11 @@ RDS 비밀번호 변수는 없다 — AWS 가 만들어 Secrets Manager 에 넣�
 ## 지울 때
 
 ```
-1 관측 flush ─> 2 허브 cluster Secret 삭제 ─> 3 네임스페이스 삭제 ─> 4 terraform destroy ─> 5 발생기 destroy
+0 남길 것 ─> 1 관측 flush ─> 2 허브 cluster Secret 삭제 ─> 3 네임스페이스 삭제 ─> 4 terraform destroy
+  ─> 5 발생기 destroy ─> 6 잔존 확인 ─> 7 DNS · kubeconfig · cgv-infra 정리 ─> 8 다음 날 비용
 ```
 
-1. **관측 데이터를 S3 에 올리고 확인한다.** Mimir ingester 는 2시간 단위로 블록을 올리고 종료할 때 남은 것을 올리지 않는다(기본값) — 그대로 지우면 마지막 부하 구간이 PVC 와 함께 사라진다. ingester `/ingester/flush` 를 부른 뒤 버킷에 새 블록이 생겼는지 본다. Loki · Tempo 도 같이.
-2. 허브에서 `cluster-cgv-stg` Secret 을 지운다 — 허브가 stg 를 더 조정하지 않게.
-3. `kubectl --context cgv-stg delete namespace app data observability observability-host` — Ingress 가 지워지며 ALB 가, PVC 가 지워지며 EBS 가 지워진다. 콘솔에서 확인한다.
-4. 이 폴더에서 `terraform destroy`
-5. 발생기를 따로 켰다면 그것도 `destroy`
+명령 · 확인 방법 · 막혔을 때는 [destroy.md](destroy.md).
 
 > [!CAUTION]
 > Application 을 지우는 것으로는 정리되지 않는다. cgv-infra ApplicationSet 이 `preserveResourcesOnDeletion` 이라 Ingress · PVC 가 남고, Terraform 밖에서 생긴 ALB · EBS 가 서브넷에 붙어 **destroy 가 막힌다.**

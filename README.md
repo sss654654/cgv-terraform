@@ -146,7 +146,7 @@
 |---|---|---|
 | 처음 한 번 | 오래 사는 자원 · 인증서 검증 · 액세스 키 | [bootstrap/README](bootstrap/README.md#처음-한-번) |
 | 켜는 날 | apply → 허브 등록 → 배달 | [envs/stg/README](envs/stg/README.md#켜는-날) |
-| 지울 때 | 관측 flush → 네임스페이스 삭제 → destroy | [envs/stg/README](envs/stg/README.md#지울-때) |
+| 지울 때 | 관측 flush → 허브 연결 끊기 → 네임스페이스 삭제 → destroy → 잔존 확인 | [envs/stg/destroy.md](envs/stg/destroy.md) |
 
 > [!CAUTION]
 > `destroy` 전에 클러스터의 네임스페이스를 먼저 지운다. Terraform 밖에서 생긴 ALB · EBS 가 서브넷에 붙어 있으면 삭제가 막힌다.

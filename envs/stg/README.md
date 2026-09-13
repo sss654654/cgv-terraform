@@ -2,13 +2,17 @@
 
 모듈 셋을 이어 stg 를 만든다. `apply` 로 켜고 `destroy` 로 끈다.
 
-```mermaid
-flowchart LR
-  IP["집 공인 IP<br/>(apply 시점 조회)"] --> NET["modules/network"]
-  NET -->|"subnet_ids"| EKS["modules/eks"]
-  NET -->|"vpc_id · subnet_ids"| DATA["modules/data"]
-  EKS -->|"cluster_security_group_id"| DATA
-  IP --> EKS
+```
+ home public IP /32 (looked up at apply) ──> network (alb-admin SG), eks (API allow-list)
+
+ ┌─ modules/network ─┐               ┌─ modules/eks ──────┐
+ │ VPC, subnets, SG  │ subnet_ids ──>│ cluster, nodegroups│
+ └─────────┬─────────┘               └─────────┬──────────┘
+           │ vpc_id, subnet_ids                │ cluster_security_group_id
+           │                                   │
+           │         ┌─ modules/data ────┐     │
+           └───────> │ RDS, ElastiCache  │ <───┘
+                     └───────────────────┘
 ```
 
 | 파일 | 무엇 |
@@ -46,10 +50,9 @@ RDS 비밀번호 변수는 없다 — AWS 가 만들어 Secrets Manager 에 넣�
 
 ## 켜는 날
 
-```mermaid
-flowchart LR
-  T1["1 · terraform apply"] --> T2["2 · kubeconfig"] --> T3["3 · register.sh"] --> T4["4 · 데이터 주소 대조"] --> T5["5 · 허브가 배달"]
-  T3 -.->|"5 와 병행"| T6["secrets.sh"]
+```
+1 terraform apply ─> 2 kubeconfig ─> 3 register.sh ─> 4 데이터 주소 대조 ─> 5 허브가 배달
+                                          └─> secrets.sh (5 와 병행)
 ```
 
 | # | 무엇 | 명령 · 위치 | kubectl |
@@ -75,9 +78,8 @@ flowchart LR
 
 ## 지울 때
 
-```mermaid
-flowchart LR
-  F["1 · 관측 flush<br/>S3 에 올라갔나"] --> H["2 · 허브에서<br/>cluster Secret 삭제"] --> N["3 · 네임스페이스 삭제<br/>ALB · EBS 사라졌나"] --> D["4 · terraform destroy"] --> G["5 · 발생기 destroy"]
+```
+1 관측 flush ─> 2 허브 cluster Secret 삭제 ─> 3 네임스페이스 삭제 ─> 4 terraform destroy ─> 5 발생기 destroy
 ```
 
 1. **관측 데이터를 S3 에 올리고 확인한다.** Mimir ingester 는 2시간 단위로 블록을 올리고 종료할 때 남은 것을 올리지 않는다(기본값) — 그대로 지우면 마지막 부하 구간이 PVC 와 함께 사라진다. ingester `/ingester/flush` 를 부른 뒤 버킷에 새 블록이 생겼는지 본다. Loki · Tempo 도 같이.

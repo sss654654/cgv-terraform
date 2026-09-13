@@ -1,23 +1,21 @@
 # modules/eks — 클러스터 · 노드그룹 · 애드온 · IRSA
 
-```mermaid
-flowchart TB
-  subgraph AWSM["AWS 가 돌린다"]
-    CP["EKS 컨트롤 플레인 1.36<br/>API: public(집 IP) + private"]
-  end
-  subgraph ACCT["내 계정"]
-    subgraph NG_APP["노드그룹 app · ×4"]
-      APP["workload=app<br/>queue · frontend · Kafka"]
-    end
-    subgraph NG_BK["노드그룹 booking-2a · booking-2c · ×1 씩"]
-      BK["workload=booking · taint"]
-    end
-    subgraph NG_OBS["노드그룹 observability · ×1 · 2c 고정"]
-      OBS["workload=observability · taint"]
-    end
-    OIDC["OIDC 공급자"] --> IRSA["IRSA 역할 ×4"]
-  end
-  CP --- NG_APP & NG_BK & NG_OBS
+```
+ ┌─ AWS-managed ─────────────────────────────────────────────────┐
+ │  EKS control plane 1.36   API: public (home IP /32) + private │
+ └───────────────────────────────┬───────────────────────────────┘
+ ┌─ my account ──────────────────┼───────────────────────────────┐
+ │           ┌───────────────────┼───────────────────┐           │
+ │           v                   v                   v           │
+ │  ┌─ app x4 ───────┐  ┌─ booking x2 ───┐  ┌─ obs x1 ───────┐   │
+ │  │ workload=app   │  │ booking only   │  │ mimir loki     │   │
+ │  │ queue frontend │  │ taint          │  │ tempo grafana  │   │
+ │  │ kafka, strimzi │  │ 2a x1, 2c x1   │  │ taint          │   │
+ │  │ AZ 2a/2b/2c    │  │                │  │ pinned to 2c   │   │
+ │  └────────────────┘  └────────────────┘  └────────────────┘   │
+ │                                                               │
+ │  OIDC ──> IRSA roles x4: obs-s3, ebs-csi, alb, cloudwatch     │
+ └───────────────────────────────────────────────────────────────┘
 ```
 
 집에서는 노드 셋이 컨트롤 플레인과 kubelet 을 겸했다. 3만 명 판에서 노드 메모리가 차자 etcd 쓰기가 4초가 되며 k3s 가 재시작했다. 여기서는 그 부분을 AWS 가 돌리고(시간당 $0.10) 노드와 떨어져 있다.
@@ -47,11 +45,12 @@ flowchart TB
 
 ### booking 을 떼어 낸 이유
 
-```mermaid
-flowchart LR
-  NEW["새로 뜬 booking JVM"] -->|"오픈 순간 컴파일 2.4코어 + 처리 1코어"| NODE["4 vCPU 노드 포화<br/>런큐 대기 15 초/초 · CPU 압력 66%"]
-  NODE --> BRK["같은 노드의 Kafka 브로커 밀림<br/>발행 p99 3.6초"]
-  BRK --> SLO["입장 전파 SLO 78–90%"]
+```
+새로 뜬 booking JVM
+ └─> 오픈 순간 컴파일 2.4코어 + 처리 1코어
+      └─> 4 vCPU 노드 포화 — 런큐 대기 15 초/초 · CPU 압력 66%
+           └─> 같은 노드의 Kafka 브로커 밀림 — 발행 p99 3.6초
+                └─> 입장 전파 SLO 78–90%
 ```
 
 - 오픈 순간 튀는 파드는 booking 하나다(queue 는 Go 라 컴파일 폭풍이 없다). 이것만 노드를 혼자 쓰게 하자 전파 SLO **100%**.
@@ -118,15 +117,11 @@ aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
 
 파드는 AWS 자원이 아니다. 파드가 가진 것은 쿠버네티스 API 서버가 서명한 ServiceAccount 토큰이고, AWS 는 그 서명을 원래 모른다.
 
-```mermaid
-sequenceDiagram
-  participant P as 파드 (SA 토큰)
-  participant S as STS
-  participant I as IAM (OIDC 공급자 · 역할)
-  P->>S: AssumeRoleWithWebIdentity (토큰)
-  S->>I: 이 발급자를 믿나? 신뢰 정책의 sub · aud 가 맞나?
-  I-->>S: 맞다
-  S-->>P: 임시 자격
+```
+1  Pod ──> STS   AssumeRoleWithWebIdentity (SA 토큰)
+2  STS ──> IAM   이 발급자(OIDC 공급자)를 믿나? 신뢰 정책의 sub · aud 가 맞나?
+3  IAM ──> STS   맞다
+4  STS ──> Pod   임시 자격
 ```
 
 | 신뢰 정책 조건 | 값 | 빼면 |

@@ -36,9 +36,8 @@ state 는 **로컬 파일**이다. 이 state 가 만드는 버킷을 backend 로
 
 ## 처음 한 번
 
-```mermaid
-flowchart LR
-  V["tfvars 작성"] --> A["terraform apply"] --> C["검증 CNAME<br/>DNS 에 추가"] --> K["액세스 키 발급<br/>(콘솔)"] --> T["비용 할당 태그<br/>활성화"]
+```
+tfvars 작성 ─> terraform apply ─> 검증 CNAME 을 DNS 에 ─> 액세스 키 발급(콘솔) ─> 비용 할당 태그 활성화
 ```
 
 1. `bootstrap/terraform.tfvars` 작성 (`.gitignore` 대상)

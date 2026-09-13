@@ -21,32 +21,25 @@
 
 ### 집과 AWS — 잇는 선은 둘
 
-```mermaid
-flowchart LR
-  subgraph HOME["집 — 온프레미스"]
-    direction TB
-    GL["GitLab CI<br/>(cgv-onprem)"]
-    REPO["cgv-infra<br/>envs/stg"]
-    HUB["ArgoCD 허브<br/>(k3s dev)"]
-    IU["image-updater"]
-  end
-
-  subgraph AWS["AWS ap-northeast-2"]
-    direction TB
-    ECR[("ECR ×3")]
-    EKS["EKS 1.36 · cgv-stg"]
-    ALB["서비스 ALB<br/>ACM · HTTPS"]
-  end
-
-  USER(["인터넷 사용자"])
-
-  GL ==>|"이미지 · publish-ecr 버튼"| ECR
-  IU -->|"새 태그 폴링"| ECR
-  IU -->|"태그 커밋"| REPO
-  HUB -->|"읽기"| REPO
-  HUB ==>|"배달 · EKS API · 집 IP 만"| EKS
-  USER -->|"443"| ALB --> EKS
 ```
+ ┌─ home (on-prem) ─────────┐                     ┌─ AWS ap-northeast-2 ─────┐
+ │ GitLab CI (cgv-onprem)   │──── publish-ecr ───>│ ECR x3                   │
+ │                          │                     │                          │
+ │ image-updater            │<──── poll tags ─────│                          │
+ │   └─> tag commit to      │                     │                          │
+ │       cgv-infra envs/stg │                     │                          │
+ │                          │                     │                          │
+ │ ArgoCD hub (k3s dev)     │───── EKS API ──────>│ EKS 1.36 (cgv-stg)       │
+ │   <── reads cgv-infra    │    home IP /32 only │   ^                      │
+ └──────────────────────────┘                     │   │                      │
+                                                  │ ALB (ACM, HTTPS)         │
+                                                  └───^──────────────────────┘
+                                                      │ 443
+                                                  internet users
+```
+
+- `publish-ecr` — CI 의 수동 버튼. 같은 이미지를 커밋 해시 이름으로 ECR 에 올린다. 누르는 것이 stg 승격 결정이다
+- `EKS API` — apply 시점의 집 공인 IP 에만 열린다. 허브는 이 선 하나로 stg 를 배달한다
 
 | 저장소 | 맡는 것 |
 |---|---|
@@ -56,39 +49,33 @@ flowchart LR
 
 ### VPC 안
 
-```mermaid
-flowchart TB
-  NET(["인터넷"]) --> ALB["ALB — 파드 IP 를 대상으로"]
-
-  subgraph VPC["VPC 10.20.0.0/16 · 퍼블릭 서브넷 3 · NAT 없음"]
-    ALB
-    subgraph AZA["AZ 2a"]
-      A_APP["app ×2<br/>queue · frontend · Kafka"]
-      A_BK["booking<br/>전용 · taint"]
-    end
-    subgraph AZB["AZ 2b"]
-      B_APP["app<br/>queue · Kafka"]
-    end
-    subgraph AZC["AZ 2c"]
-      C_APP["app<br/>queue · Kafka"]
-      C_BK["booking<br/>전용 · taint"]
-      C_OBS["관측<br/>AZ 고정 · taint"]
-    end
-    subgraph DATA["관리형 데이터"]
-      RDS[("RDS MySQL 8.4<br/>Multi-AZ")]
-      REDIS[("ElastiCache Redis 7.1<br/>복제본 · TLS + AUTH")]
-    end
-  end
-
-  S3[("S3 관측 버킷")]
-
-  ALB --> A_APP & B_APP & C_APP & A_BK & C_BK
-  A_BK & C_BK --> RDS
-  A_APP & B_APP & C_APP & A_BK & C_BK --> REDIS
-  C_OBS -->|"IRSA"| S3
+```
+                                                internet
+                                                    │ 443
+ ┌─ VPC 10.20.0.0/16 ───────────────────────────────v─────────────────────┐
+ │                                                  │                     │
+ │                                      ALB (target type: pod IP)         │
+ │                                                  │                     │
+ │  ┌─ app x4 (spread over 2a/2b/2c) ───────────────v──────────────────┐  │
+ │  │ queue x4 (1 per node)   frontend   kafka x3 (1 per AZ)           │  │
+ │  └──────────────────────────────────────────────────────────────────┘  │
+ │  ┌─ booking-2a x1 ─────┐  ┌─ booking-2c x1 ─────┐  ┌─ obs x1 (2c) ─┐   │
+ │  │ booking             │  │ booking             │  │ mimir loki    │   │
+ │  │ taint NoSchedule    │  │ taint NoSchedule    │  │ tempo grafana │   │
+ │  │                     │  │                     │  │ pinned to 2c  │   │
+ │  └─────────────────────┘  └─────────────────────┘  └───────────────┘   │
+ │            │                        │                                  │
+ │            v                        v                                  │
+ │  ┌─ managed data (inbound from node SG only) ───────────────────────┐  │
+ │  │ RDS MySQL 8.4 (Multi-AZ)            <- booking                   │  │
+ │  │ ElastiCache Redis 7.1 (TLS + AUTH)  <- queue, booking            │  │
+ │  └──────────────────────────────────────────────────────────────────┘  │
+ └────────────────────────────────────────────────────────────────────────┘
+   obs node ──IRSA──> S3 observability buckets (bootstrap)
 ```
 
-노드는 전부 m5.xlarge(4 vCPU) · 7대 · 28 vCPU. 데이터는 노드 보안 그룹에서만 들어온다.
+- 퍼블릭 서브넷 셋(2a · 2b · 2c) · NAT 없음. 노드는 전부 m5.xlarge(4 vCPU) · 7대 · 28 vCPU
+- 데이터는 노드 보안 그룹에서 오는 연결만 받는다
 
 ---
 
@@ -135,20 +122,18 @@ flowchart TB
 | [`modules/eks/`](modules/eks/README.md) | 클러스터 · 노드그룹 넷 · 애드온 · IRSA | |
 | [`modules/data/`](modules/data/README.md) | RDS · ElastiCache · Redis AUTH 시크릿 | |
 
-```mermaid
-flowchart LR
-  subgraph BOOT["bootstrap — 지우지 않는다"]
-    direction TB
-    TFS[("tfstate")]
-    OBS[("관측 버킷 ×3")]
-    ECR[("ECR ×3")]
-  end
-  subgraph STG["envs/stg — 하루 쓰고 destroy"]
-    direction TB
-    NETM["network"] --> EKSM["eks"] --> DATAM["data"]
-  end
-  STG -.->|"state"| TFS
-  EKSM -.->|"IRSA"| OBS
+```
+ ┌─ envs/stg (S3 state, destroyed after the run) ───────────┐
+ │                                                          │
+ │   network ───> eks ───> data                             │
+ │     │           │                                        │
+ └─────┼───────────┼────────────────────────────────────────┘
+       │ state     │ IRSA
+ ┌─────┼───────────┼─ bootstrap (local state, kept) ────────┐
+ │     v           v                                        │
+ │   tfstate      obs buckets x3   ECR x3   ACM cert        │
+ │   ALB log bucket   IAM users x2   budget alarm           │
+ └──────────────────────────────────────────────────────────┘
 ```
 
 한 state 였다면 `destroy` 한 번에 판 결과와 이미지까지 사라진다.

@@ -1,16 +1,21 @@
 # modules/network — VPC 와 그 안의 길
 
-```mermaid
-flowchart TB
-  NET(["인터넷"]) <--> IGW["Internet Gateway"]
-  subgraph VPC["VPC 10.20.0.0/16"]
-    IGW --> RT["라우팅 테이블<br/>0.0.0.0/0 → IGW"]
-    RT --> SA["퍼블릭 서브넷 2a<br/>/20"]
-    RT --> SC["퍼블릭 서브넷 2c<br/>/20"]
-    RT --> SB["퍼블릭 서브넷 2b<br/>/20"]
-    SGP["보안 그룹 alb-public<br/>80 · 443 ← 인터넷"]
-    SGA["보안 그룹 alb-admin<br/>80 ← 집 IP"]
-  end
+```
+                          internet
+                              │
+                      Internet Gateway
+                              │
+ ┌─ VPC 10.20.0.0/16 ─────────┼───────────────────────────────┐
+ │                            │ route table 0.0.0.0/0 -> IGW  │
+ │          ┌─────────────────┼─────────────────┐             │
+ │          v                 v                 v             │
+ │   ┌─ subnet 2a ─┐   ┌─ subnet 2c ─┐   ┌─ subnet 2b ─┐      │
+ │   │ /20, public │   │ /20, public │   │ /20, public │      │
+ │   └─────────────┘   └─────────────┘   └─────────────┘      │
+ │                                                            │
+ │   SG alb-public   80, 443  <- 0.0.0.0/0                    │
+ │   SG alb-admin    80       <- home IP /32                  │
+ └────────────────────────────────────────────────────────────┘
 ```
 
 ## 집(온프레미스)과 짝을 맞추면

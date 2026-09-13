@@ -1,21 +1,18 @@
 # modules/data — 클러스터 밖으로 뺀 둘
 
-```mermaid
-flowchart LR
-  subgraph NODES["EKS 노드 (클러스터 보안 그룹)"]
-    BK["booking"]
-    Q["queue"]
-  end
-  subgraph DATA["데이터 보안 그룹 — 노드 그룹에서만"]
-    RDS[("RDS MySQL 8.4<br/>주 + 동기 대기 (Multi-AZ)")]
-    REDIS[("ElastiCache Redis 7.1<br/>주 + 복제본 · 자동 전환")]
-  end
-  SM["Secrets Manager<br/>RDS 마스터 · Redis AUTH"]
-
-  BK -->|"3306"| RDS
-  BK -->|"6379 · TLS + AUTH"| REDIS
-  Q -->|"6379 · TLS + AUTH"| REDIS
-  SM -.->|"cgv-infra secrets.sh 가 읽는다"| NODES
+```
+ ┌─ EKS nodes (cluster security group) ─────────────────────┐
+ │    booking                        queue                  │
+ └──────┬───────────┬────────────────┬──────────────────────┘
+        │ 3306      │ 6379           │ 6379
+        │           │ TLS + AUTH     │ TLS + AUTH
+ ┌──────┼───────────┼────────────────┼─ data SG ────────────┐
+ │      v           └───────┬────────┘                      │
+ │  RDS MySQL 8.4           v                               │
+ │  primary + standby   ElastiCache Redis 7.1               │
+ │  (Multi-AZ, sync)    primary + replica, auto failover    │
+ └──────────────────────────────────────────────────────────┘
+   Secrets Manager (RDS master, Redis AUTH) ──> cgv-infra secrets.sh
 ```
 
 ## 무엇을 관리형으로 뺐나 — 칸마다 근거가 다르다
@@ -58,9 +55,9 @@ flowchart LR
 
 빈 그룹을 새로 만들면 기본값(`required` · `SET`)으로 한 번에 된다. **이미 떠 있는 평문 그룹**에만 AWS 가 두 단계씩을 요구한다.
 
-```mermaid
-flowchart LR
-  P["transit preferred<br/>평문 · TLS 둘 다 받음"] --> APP["앱 재기동<br/>TLS · 비밀번호로"] --> R["transit required<br/>평문 끊음"] --> RO["auth ROTATE<br/>토큰 추가"] --> S["auth SET<br/>토큰만 받음"]
+```
+transit preferred ─> 앱 재기동 ─> transit required ─> auth ROTATE ─> auth SET
+평문·TLS 둘 다       TLS·비밀번호   평문 끊음            토큰 추가        토큰만
 ```
 
 ```

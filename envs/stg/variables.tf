@@ -98,13 +98,14 @@ variable "app_instance_type" {
 
 variable "app_node_count" {
   description = <<-EOT
-    booking 이 전용 노드그룹으로 빠진 뒤 이 노드에 남는 것은 queue 넷 · Kafka 브로커 셋 · frontend 둘이다.
-    브로커는 requests = limits = 1 코어(Guaranteed)라, 셋이 노드를 하나씩 쓰려면 노드도 셋이어야 한다.
-    셋이면 app 노드가 ap-northeast-2a · 2b · 2c 에 하나씩 놓인다.
-    request 합 7,015m / 11,760m = 60%(노드마다 DaemonSet 340m 포함).
+    queue 파드 수(4)와 맞춘다. 노드를 셋으로 줄였더니 queue 넷 중 둘이 한 노드에 앉았고,
+    2.5만 명 판에서 그 두 파드만 enter 1초 초과를 5,055 건 · 5,142 건 냈다(다른 노드의 둘은 0 건).
+    그 노드는 limit 합이 6.45 코어로 allocatable 3.92 를 넘었고 런큐 대기가 4.16 초/초였다.
+    같은 시각 ElastiCache 엔진 CPU 는 1.88% 라 Redis 는 놀고 있었다 — 느린 것은 CPU 차례다.
+    넷이면 app 노드가 ap-northeast-2a · 2b · 2c 에 2+1+1 로 놓인다.
   EOT
   type        = number
-  default     = 3
+  default     = 4
 }
 
 variable "obs_instance_type" {

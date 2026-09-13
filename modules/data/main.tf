@@ -201,7 +201,7 @@ resource "aws_elasticache_replication_group" "this" {
   # 빈 클러스터를 새로 만들 때는 required 로 바로 만들 수 있다 — 다음 판부터는 이 값이 required 다.
   # ★ preferred 인 동안은 평문 연결이 살아 있으므로 보안 그룹이 유일한 방어다. 오래 두지 않는다.
   transit_encryption_mode = var.redis_transit_encryption_mode
-  auth_token = random_password.redis_auth.result
+  auth_token              = random_password.redis_auth.result
   # 이미 떠 있는 그룹에 토큰을 처음 붙일 때는 SET 을 못 쓴다 — 바꿀 옛 토큰이 없기 때문이다.
   #   ROTATE  토큰을 더한다. 이 상태에서는 토큰을 보내는 연결과 안 보내는 연결이 둘 다 통한다
   #   SET     그 토큰만 받는다. 앱이 전부 토큰을 들고 붙은 뒤에 옮긴다

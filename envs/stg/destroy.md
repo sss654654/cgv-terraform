@@ -95,12 +95,22 @@ aws resourcegroupstaggingapi get-resources --tag-filters Key=elbv2.k8s.aws/clust
 aws ec2 describe-volumes --filters Name=tag-key,Values=ebs.csi.aws.com/cluster --query "Volumes[].[VolumeId, State]"
 ```
 
+- `namespace "…" deleted` 는 삭제 요청을 받았다는 출력이다. 명령은 네임스페이스가 실제로 없어질 때까지 기다렸다가 돌아온다
 - 태그 API 는 삭제 직후 지운 자원을 잠시 더 보여 줄 수 있다. 남으면 `aws elbv2 describe-load-balancers --query "LoadBalancers[].LoadBalancerName"` 로 직접 본다
-- 네임스페이스가 `Terminating` 에서 멈추면 남은 객체와 컨트롤러 로그를 본다. **finalizer 를 손으로 지우면 AWS 자원이 남는다**
+- 네임스페이스가 `Terminating` 에서 멈추면 남은 객체와 컨트롤러 로그를 본다. **Ingress · PVC 의 finalizer 를 손으로 지우면 AWS 자원이 남는다**
 
 ```powershell
+kubectl --context cgv-stg get ns app data observability observability-host -o jsonpath="{range .items[*]}{.metadata.name}: {.status.conditions[*].message}{'\n'}{end}"
 kubectl --context cgv-stg get ingress,pvc -A
 kubectl --context cgv-stg -n kube-system logs deploy/aws-load-balancer-controller --tail 50
+```
+
+**`data` 가 `kafkatopics.kafka.strimzi.io has N resource instances` 로 멈출 때** — KafkaTopic 의 `strimzi.io/topic-operator` finalizer 는 같은 네임스페이스의 토픽 오퍼레이터가 지우는데, 오퍼레이터가 먼저 지워져 아무도 지우지 않는다. 브로커 · PVC 가 이미 없고 AWS 자원과 무관하므로 이 finalizer 만 지운다(2026-09-14 실제로 멈춤, 토픽 5개).
+
+```powershell
+foreach ($t in (kubectl --context cgv-stg -n data get kafkatopics -o name)) {
+  kubectl --context cgv-stg -n data patch $t --type=merge -p '{\"metadata\":{\"finalizers\":null}}'
+}
 ```
 
 ---
